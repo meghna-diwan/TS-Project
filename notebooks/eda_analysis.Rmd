@@ -1,0 +1,132 @@
+---
+title: "EDA"
+author: "Meghna Diwan"
+date: "4/30/2020"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+suppressMessages(library(tidyverse))
+suppressMessages(library(forecast))
+suppressMessages(library(tseries))
+suppressMessages(library(ggplot2))
+suppressMessages(library(ggthemes))
+rm(list = ls())
+```
+
+# Import Data
+```{r}
+dataPath = "/Users/meghnadiwan/Downloads/Spring2020/Time-Series/Final-Project/web-traffic-time-series-forecasting"
+# key_1 = read.csv(file=paste(dataPath,"key_1.csv",sep="/"), nrows=100) 
+#sample = read.csv(file=paste(dataPath,"sample_submission_1.csv",sep="/"), nrows = 100)
+
+train = read.csv(file=paste(dataPath,"train_2.csv",sep="/"))
+# check shape
+c(ncol(train),nrow(train))
+```
+
+# Count missing
+```{r}
+# % Missing
+sum(is.na(train))/(ncol(train)*nrow(train))*100
+
+# Add count of missing data for each row
+train$na_count <- apply(train, 1, function(x) sum(is.na(x)))
+```
+
+```{r}
+# Create pages as a seperate dataframe
+pages = train %>% select(Page, na_count) %>% rownames_to_column() 
+
+# Seperate article, locale, access, agent 
+mediawiki <- pages %>% filter(str_detect(Page, "mediawiki"))
+wikimedia <- pages %>% filter(str_detect(Page, "wikimedia"))
+wikipedia <- pages %>% filter(str_detect(Page, "wikipedia")) %>% 
+  filter(!str_detect(Page, "wikimedia")) %>%
+  filter(!str_detect(Page, "mediawiki"))
+
+wikipedia <- wikipedia %>%
+  separate(Page, into = c("foo", "bar"), sep = ".wikipedia.org_") %>%
+  separate(foo, into = c("article", "locale"), sep = -3) %>%
+  separate(bar, into = c("access", "agent"), sep = "_") %>%
+  mutate(locale = str_sub(locale,2,3))
+
+wikimedia <- wikimedia %>%
+  separate(Page, into = c("article", "bar"), sep = "_commons.wikimedia.org_") %>%
+  separate(bar, into = c("access", "agent"), sep = "_") %>%
+  add_column(locale = "wikmed")
+
+mediawiki <- mediawiki %>%
+  separate(Page, into = c("article", "bar"), sep = "_www.mediawiki.org_") %>%
+  separate(bar, into = c("access", "agent"), sep = "_") %>%
+  add_column(locale = "medwik")
+
+tpages <- wikipedia %>%
+  full_join(wikimedia, by = c("rowname", "article", "locale", "access", "agent", "na_count")) %>%
+  full_join(mediawiki, by = c("rowname", "article", "locale", "access", "agent", 
+                            "na_count"))
+
+rm(pages, mediawiki, wikimedia, wikipedia)
+```
+
+```{r}
+# certain articles in multiple languages
+eg = tpages[grepl("phone", tpages$article, ignore.case = TRUE), ]
+
+## to see just the values in console - 
+grep("facebook", tpages$article, value = TRUE , ignore.case = TRUE)
+```
+
+## Functions to Extract and Plot TS
+```{r}
+extract_ts = function(df, row){
+  df %>% select(-Page, -na_count) %>%
+  filter(row_number() == row) %>%
+  rownames_to_column %>%
+  select(-rowname) %>%
+  gather(date, views) %>%
+  mutate(date = str_replace(str_replace_all(date, "\\.", "-"), "X", "")) %>%
+  mutate(date = ymd(date),
+        views = as.integer(views))
+}
+
+plot_ts = function(df, row){
+  art = tpages %>% filter(rowname == row) %>% .$article
+  loc = tpages %>% filter(rowname == row) %>% .$locale
+  acc = tpages %>% filter(rowname == row) %>% .$access
+  
+  extract_ts(df, row) %>%
+    ggplot(aes(date, views)) +
+    geom_line() +
+    geom_smooth(method = "loess", color = "blue", span = 1/5) +
+    labs(title = str_c(art, " - ", loc, " - ", acc), y = "Views")
+}
+#plot_ts(train, 12)
+  
+convert_ts = function(df, row, freq, start_dt){
+  ts = extract_ts(df, row)
+  ts(unlist(ts$views), frequency=freq, 
+     start = c(year(start_dt), as.numeric(format(ymd(start_dt), "%j"))))
+}
+#ts = convert_ts(train, 12, 365, "2015-07-01")
+
+```
+
+## HISTORICAL FIGURES
+```{r}
+Dwight_D._Eisenhower	- 31423
+Edward_VIII	
+Elizabeth_Warren	
+F._Scott_Fitzgerald	- 41096
+Elvis_Presley
+Frank_Sinatra	
+Frederick_Douglass	
+```
+
+## JAPANESE ARTICLES
+```{r}
+japanese = subset(tpages, locale=="ja")
+english = subset(tpages, locale=="en")
+```
+
+
