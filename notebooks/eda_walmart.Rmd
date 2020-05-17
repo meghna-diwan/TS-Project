@@ -1,0 +1,182 @@
+---
+title: "eda_walmart"
+author: "Meghna Diwan"
+date: "5/16/2020"
+output: html_document
+---
+
+```{r}
+library(reshape2) ## for data cleaning
+library(data.table) ## for quick and RAM efficient loading
+library(tidyr) ## for data cleaning
+library(tidyverse) ## for data cleaning and piping
+library(lubridate) ## for date class transformation
+library(splitstackshape) ## for stratified sampling
+library(ggplot2) ## for data visualizations and exploration
+library(ggpubr) ## for compiling and combining the plots
+
+
+library(forecast)
+library(tseries)
+rm(list = ls())
+```
+
+# Import data
+```{r}
+# change datapath to import data
+dataPath = "/Users/meghnadiwan/Downloads/Spring2020/Time-Series/Final-Project/m5-forecasting-accuracy"
+
+#import data
+sell_prices = read.csv(file=paste(dataPath,"sell_prices.csv",sep="/"), 
+                       sep = ",", na = c("NA", ""))
+calendar = read.csv(file=paste(dataPath,"calendar.csv",sep="/"), 
+                       sep = ",", na = c("NA", ""))
+train = read.csv(file=paste(dataPath,"sales_train_validation.csv",sep="/"), 
+                       sep = ",", na = c("NA", ""))
+
+## Getting a glimpse of the datasets
+head(calendar, n = 3)
+head(sell_prices, n = 3)
+head(train, n = 3)
+```
+
+# Reshape train to long
+```{r}
+train <- train %>% 
+            melt(id.vars = c("id", "item_id", "dept_id", 
+                             "cat_id", "store_id", "state_id"),
+                 variable.name = "day", 
+                 value.name = "Unit_Sales") 
+
+# ignore the error
+```
+
+
+# Check missing values
+```{r}
+data.frame(calendar = colSums(is.na(calendar)))
+data.frame(sell_prices = colSums(is.na(sell_prices)))
+data.frame(train = colSums(is.na(train)))
+```
+
+# Merge with calendar and sell_price data
+```{r}
+train <- left_join(train, calendar,
+                   by = c("day" = "d"))
+
+train <- left_join(train, sell_prices,
+                   by = c("wm_yr_wk" = "wm_yr_wk", "store_id" = "store_id", "item_id" = "item_id"))
+```
+
+
+# Collapse Data into by Category, State and Day
+```{r}
+library(dplyr)
+train2 = train %>%
+          select(cat_id, state_id, day, Unit_Sales, sell_price) %>%
+          group_by(cat_id, state_id, day) %>%
+          summarize(tot_sales = sum(Unit_Sales), avg_price = mean(sell_price, na.rm = T))
+
+# check for missing values
+data.frame(train2 = colSums(is.na(train2)))
+```
+
+
+```{r}
+# Subset by Category and State
+food_ca = subset(train2, cat_id == "FOODS" & state_id == "CA", 
+                 select = c(day, tot_sales, avg_price))
+names(food_ca) = c("day", "food_ca", "avg_price_food_ca")
+
+food_wi = subset(train2, cat_id == "FOODS" & state_id == "WI", 
+                 select = c(tot_sales, avg_price))
+names(food_wi) = c("food_wi", "avg_price_food_wi")
+
+food_tx = subset(train2, cat_id == "FOODS" & state_id == "TX", 
+                 select = c(tot_sales, avg_price))
+names(food_tx) = c("food_tx", "avg_price_food_tx")
+
+hobby_ca = subset(train2, cat_id == "HOBBIES" & state_id == "CA", 
+                  select = c(tot_sales, avg_price))
+names(hobby_ca) = c("hobby_ca", "avg_price_hobby_ca")
+
+hobby_wi = subset(train2, cat_id == "HOBBIES" & state_id == "WI", 
+                  select = c(tot_sales, avg_price))
+names(hobby_wi) = c("hobby_wi", "avg_price_hobby_wi")
+
+hobby_tx = subset(train2, cat_id == "HOBBIES" & state_id == "TX", 
+                  select = c(tot_sales, avg_price))
+names(hobby_tx) = c("hobby_tx", "avg_price_hobby_tx")
+
+house_ca = subset(train2, cat_id == "HOUSEHOLD" & state_id == "CA", 
+                  select = c(tot_sales, avg_price))
+names(house_ca) = c("house_ca", "avg_price_house_ca")
+
+house_wi = subset(train2, cat_id == "HOUSEHOLD" & state_id == "WI", 
+                  select = c(tot_sales, avg_price))
+names(house_wi) = c("house_wi", "avg_price_house_wi")
+
+house_tx = subset(train2, cat_id == "HOUSEHOLD" & state_id == "TX", 
+                  select = c(tot_sales, avg_price))
+names(house_tx) = c("house_tx", "avg_price_house_tx")
+
+train_final  = cbind(food_ca, food_wi, food_tx, hobby_ca, hobby_wi, hobby_tx, house_ca, house_wi, house_tx)
+
+rm(food_ca, food_wi, food_tx, hobby_ca, hobby_wi, hobby_tx, house_ca, house_wi, house_tx)
+```
+
+
+```{r}
+## Merging the calendar data into the train data
+library(dplyr)
+train <- left_join(train_final, calendar,
+                   by = c("day" = "d"))
+
+write.csv(train,'train_md.csv')
+rm(train_final, train2, calendar, sell_prices)
+```
+
+
+```{r}
+
+# function to convest a column to ts
+convert_ts = function(colname, freq){
+ # colname - string column name
+ # freq = frequency of ts data i.e. daily, monthly, yearly, etc
+  
+   ts(unlist(train[, colname]), frequency=freq, 
+     start = c(year("2011-01-29"), as.numeric(format(ymd("2011-01-29"), "%j"))))
+}
+
+# unit quantity sales eg - daily ts
+ts1 = convert_ts("food_ca", 365.25)
+ts2 = convert_ts("food_wi", 365.25)
+ts3 = convert_ts("food_tx", 365.25)
+ts.plot(ts1, ts2, ts3, gpars= list(col=c("red", "blue", "green")))
+```
+
+
+# checking ts decomposition
+```{r}
+# ts decomposition
+fit = stl(ts1, s.window = "periodic", robust = T)
+plot(fit)
+# forecast for next 28 days
+stl_pred = forecast(fit, h=28)
+plot(stl_pred)
+```
+
+# checking linear regression model
+```{r}
+lr = lm(train$food_ca ~ train$avg_price_food_ca, data = train)
+summary(lr)
+plot(train$avg_price_food_ca, train$food_ca)
+abline(lr)
+acf(lr$residuals)
+pacf(lr$residuals)
+
+# residuals are not white noise
+```
+
+
+
