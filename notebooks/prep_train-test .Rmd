@@ -1,0 +1,83 @@
+---
+title: "Create Train & Test"
+author: "Meghna Diwan"
+date: "5/21/2020"
+output: html_document
+---
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(lubridate)
+library(xts)
+library(leaflet)
+library(ggfortify)
+library(tidyquant)
+
+library(forecast)
+library(tseries)
+library(TSA)
+rm(list = ls())
+gc()
+```
+
+# Import Data
+```{r}
+train <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/train.csv')
+stores <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/stores.csv')
+oil <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/oil.csv')
+items <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/items.csv')
+transactions <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/transactions.csv')
+holiday = fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/holidays_events.csv')
+test = fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/test.csv')
+```
+
+# Check Missing Data
+```{r}
+data.frame(dtrain = colSums(is.na(train)))
+data.frame(stores = colSums(is.na(stores)))
+data.frame(oil = colSums(is.na(oil)))
+data.frame(items = colSums(is.na(items)))
+data.frame(transactions = colSums(is.na(transactions)))
+data.frame(holiday = colSums(is.na(holiday)))
+data.frame(test = colSums(is.na(test)))
+```
+
+# Make promotions binary
+```{r}
+# Train
+train$promotion = ifelse(train$onpromotion == TRUE, 1, 0)
+train$promotion[is.na(train$promotion)] = 0
+
+# Test
+test$promotion = ifelse(test$onpromotion == TRUE, 1, 0)
+test$promotion[is.na(test$promotion)] = 0
+```
+
+# Collapse to item level
+```{r}
+# Train
+train_item <- left_join(train, items)
+train_item_lvl = train_item %>%
+                    select(date, item_nbr, family, unit_sales, promotion, perishable) %>%
+                    group_by(date, family) %>%
+                    summarize(tot_sales = sum(unit_sales), 
+                              n_promotion = sum(promotion),
+                              perishable = max(perishable))
+
+# Test
+test_item <- left_join(test, items)
+test_item_lvl = test_item %>%
+                    select(date, item_nbr, family, promotion, perishable) %>%
+                    group_by(date, family) %>%
+                    summarize(n_promotion = sum(promotion),
+                              perishable = max(perishable))
+
+```
+
+# Write to CSV
+```{r}
+write.csv(train_item_lvl,'/Volumes/SSD/TS-Project/data/subset/train_item.csv')
+write.csv(test_item_lvl,'/Volumes/SSD/TS-Project/data/subset/test_item.csv')
+```
+

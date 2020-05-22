@@ -1,0 +1,144 @@
+---
+title: "grocery_eda"
+author: "Meghna Diwan"
+date: "5/21/2020"
+output: html_document
+---
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(lubridate)
+library(xts)
+library(leaflet)
+library(ggfortify)
+library(tidyquant)
+
+library(forecast)
+library(tseries)
+library(TSA)
+rm(list = ls())
+```
+
+
+# Import datasets
+```{r}
+dtrain <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/train.csv', showProgress = FALSE)
+stores <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/stores.csv')
+oil <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/oil.csv')
+items <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/items.csv')
+transactions <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/transactions.csv')
+holiday = fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/holidays_events.csv')
+test = fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/test.csv')
+```
+
+```{r}
+data.frame(dtrain = colSums(is.na(dtrain)))
+data.frame(stores = colSums(is.na(stores)))
+data.frame(oil = colSums(is.na(oil))) # need to remove nas
+data.frame(items = colSums(is.na(items)))
+data.frame(transactions = colSums(is.na(transactions)))
+data.frame(holiday = colSums(is.na(holiday)))
+data.frame(test = colSums(is.na(test)))
+```
+
+
+# Data
+```{r}
+glimpse(dtrain)
+unique(items$family)
+unique(stores$cluster) # groups of similar stores
+```
+
+# Top 10 stores by item sold
+```{r}
+Top10Stores = dtrain %>%
+  group_by(store_nbr) %>%
+  summarise(Count = sum(unit_sales)) %>%
+  arrange(desc(Count)) %>%
+  head(10) 
+
+Top10StoresDescription = inner_join(Top10Stores,stores)
+Top10StoresDescription
+```
+
+# Top Selling items in Store 44
+```{r}
+Top10Items = dtrain %>%
+                filter(store_nbr == 44) %>%
+                filter(!is.na(item_nbr)) %>%
+                group_by(item_nbr) %>%
+                summarise(Count = n()) %>%
+                ungroup() %>%
+                mutate(item_nbr = reorder(item_nbr,Count)) %>%
+                arrange(desc(Count)) %>%
+                head(10)
+Top10Items$item_nbr = as.integer(as.character(Top10Items$item_nbr))
+Top10ItemsDescription = inner_join(Top10Items,items)
+Top10ItemsDescription
+```
+
+# Check if all dates are available between 2013 and 2017
+```{r}
+dates_all = seq(as.Date("2013-01-01"), as.Date("2017-08-15"), by="days")
+dates = as.Date(unique(dtrain$date))
+as.Date(setdiff(dates_all, dates)) # dates missing are Christmas day in all 4 years - stores closed on that date
+
+# Oil Dates - not continuous
+head(oil$date)
+tail(oil$date)
+oil$date = as.Date(oil$date)
+as.Date(setdiff(dates_all, oil$date))
+
+```
+
+# Collapse Data
+```{r}
+# Shopping behavior patterns of Ecudor
+dtrain$promotion = ifelse(dtrain$onpromotion == TRUE, 1, 0)
+dtrain$promotion[is.na(dtrain$promotion)] = 0
+
+dtrain_item <- left_join(dtrain, items)
+
+dtrain_item_lvl = dtrain_item %>%
+                    select(date, item_nbr, family, unit_sales, promotion, perishable) %>%
+                    group_by(date, family) %>%
+                    summarize(tot_sales = sum(unit_sales), 
+                              promotion = max(promotion, na.rm = T),
+                              perishable = sum(perishable))
+
+TopItems = dtrain_item_lvl %>%
+                group_by(family) %>%
+                summarise(sales = sum(tot_sales)) %>%
+                ungroup() %>%
+                mutate(family = reorder(family,sales)) %>%
+                arrange(desc(sales)) %>%
+                head(10)
+TopItems
+```
+
+# Create Time Series
+```{r}
+grocery = subset(dtrain_item_lvl, select = tot_sales,
+                 family == 'GROCERY I')
+grocery_ts = ts(grocery, frequency=365.25, 
+     start = c(year("2013-01-01"), 1))
+plot(grocery_ts, col = "blue")
+acf(grocery_ts, 100)
+pacf(grocery_ts, 100)
+eacf(grocery_ts)
+```
+
+# Add Christmas day back to dataset - maybe?
+```{r}
+fam = unique(items$family)
+dat = c("2013-12-25", "2014-12-25", "2015-12-25", "2016-12-25")
+xmas = c()
+i = 1
+for (f in fam) {
+  for (d in dat) {
+    xmas = rbind(xmas, c('date' = d, 'family' = f, 'tot_sales' = 0, 'promotion' = 0, 'perishable' = 0))
+  }
+}
+```
+
