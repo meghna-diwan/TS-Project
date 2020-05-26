@@ -18,20 +18,35 @@ library(forecast)
 library(tseries)
 library(TSA)
 rm(list = ls())
+gc()
 ```
 
 
 # Import datasets
 ```{r}
-dtrain <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/train.csv', showProgress = FALSE)
-stores <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/stores.csv')
-oil <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/oil.csv')
-items <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/items.csv')
-transactions <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/transactions.csv')
-holiday = fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/holidays_events.csv')
-test = fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/test.csv')
+datapath = "/Volumes/SSD/TS-Project/data"
+dtrain <- fread(file=paste(datapath,"full/train.csv",sep="/"))
+stores <- fread(file=paste(datapath,"full/stores.csv",sep="/"))
+#oil <- fread(file=paste(datapath,"oil.csv",sep="/"))
+items <- fread(file=paste(datapath,"full/items.csv",sep="/"))
+#transactions <- fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/transactions.csv')
+#holiday = fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/holidays_events.csv')
+#test = fread('/Volumes/SSD/TS-Project/favorita-grocery-sales-forecasting/test.csv')
+
+library(readxl)
+item_map = read_excel(path = paste(datapath,"full/store_item_map.xlsx",sep="/"), sheet = "item_map")
+store_map = read_excel(path = paste(datapath,"full/store_item_map.xlsx",sep="/"), sheet = "store_map")
+cluster_map = read_excel(path = paste(datapath,"full/store_item_map.xlsx",sep="/"), sheet = "cluster_map")
 ```
 
+# Add Item and Store maps to iten and store df
+```{r}
+items = left_join(items, item_map, by= 'family')
+stores = left_join(stores, store_map, by = 'store_nbr')
+stores = left_join(stores, cluster_map, by = 'cluster')
+```
+
+# Check for missing values
 ```{r}
 data.frame(dtrain = colSums(is.na(dtrain)))
 data.frame(stores = colSums(is.na(stores)))
@@ -42,11 +57,11 @@ data.frame(holiday = colSums(is.na(holiday)))
 data.frame(test = colSums(is.na(test)))
 ```
 
-
 # Data
 ```{r}
 glimpse(dtrain)
 unique(items$family)
+unique(dtrain$store_nbr)
 unique(stores$cluster) # groups of similar stores
 ```
 
@@ -89,7 +104,6 @@ head(oil$date)
 tail(oil$date)
 oil$date = as.Date(oil$date)
 as.Date(setdiff(dates_all, oil$date))
-
 ```
 
 # Collapse Data
@@ -142,3 +156,83 @@ for (f in fam) {
 }
 ```
 
+
+# Prep for Heirachical TS
+```{r}
+train <- left_join(dtrain, items)
+train_fam = train %>%
+              select(date, store_nbr, item_nbr, family, family_nbr, unit_sales) %>%
+              group_by(date, store_nbr, family, family_nbr) %>%
+              summarize(tot_sales = sum(unit_sales))
+train_fam = left_join(train_fam, stores)
+write.csv(train_fam, paste(datapath,"subset/train_store_fam.csv",sep="/"))
+```
+
+# Create HTS TS
+```{r}
+library(hts)
+library(fpp2)
+library(tsbox)
+
+
+train = fread(file=paste(datapath,"subset/train_store_fam.csv",sep="/"))
+subset = train %>% 
+  select(date, store_char, cluster_nbr, family_nbr, tot_sales) %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
+  filter(date >= as.Date('2013-01-01') & date < as.Date('2014-01-01'))
+  
+# family and cluster
+subset$id = paste0(subset$cluster_nbr,subset$family_nbr)
+subset_wide = spread(subset, id, tot_sales)
+subset_wide[is.na(subset_wide)] = 0
+subset_wide = subset_wide %>%
+                  select(-store_char, -cluster_nbr, -family_nbr) %>%
+                  group_by(date) %>%
+                  summarise_all(funs(sum))
+subset.ts = as.xts(subset_wide[2:34],order.by=as.Date(subset_wide$date, "%Y-%m-%d")) 
+
+# Find nodes for each level
+n_nodes = subset %>%
+            group_by(cluster_nbr) %>%
+            summarise(n_fam = COUNT_UNIQUE(family_nbr))
+
+
+# Create HTS
+subset_hts = hts(subset.ts, characters = c(3, 5))
+subset_hts = hts(subset.ts[1:364], characters = c(3, 5), nodes=list(17, n_nodes$n_fam))
+
+# Graph by stores
+subset_hts %>% aggts(levels=0:1) %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Sales") + ggtitle("Grocery Stores")
+
+# Graph by Store and Item Family
+cols <- sample(scales::hue_pal(h=c(15,375),
+  c=100,l=65,h.start=0,direction = 1)(NCOL(subset.ts)))
+as_tibble(subset.ts) %>%
+  gather(Zone) %>%
+  mutate(Date = rep(time(subset.ts), NCOL(subset.ts)),
+         State = str_sub(Zone,1,3)) %>%
+  ggplot(aes(x=Date, y=value, group=Zone, colour=Zone)) +
+    geom_line() +
+    facet_grid(State~., scales="free_y") +
+    xlab("Year") + ylab("Sales") +
+    ggtitle("Grocery Sales by Item Family") +
+    scale_colour_manual(values = cols)
+```
+
+
+# Extra Code
+```{r}
+# store1
+store_1 = subset(train_store_item, store_nbr == 1)
+store_1 = spread(store_1, family, tot_sales)
+store_1[is.na(store_1)] = 0
+store_1.ts = as.xts(store_1[3:34],order.by=as.Date(store_1$date, "%Y-%m-%d"))
+
+# store2
+store_2 = subset(train_store_item, store_nbr == 2)
+store_2 = spread(store_2, family, tot_sales)
+store_2[is.na(store_2)] = 0
+store_2.ts = as.xts(store_2[3:34],order.by=as.Date(store_2$date, "%Y-%m-%d"))
+```
