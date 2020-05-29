@@ -1,0 +1,90 @@
+---
+title: "models"
+author: "Meghna Diwan"
+date: "5/29/2020"
+output: html_document
+---
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(lubridate)
+library(xts)
+library(leaflet)
+library(ggfortify)
+library(tidyquant)
+library(forecast)
+library(tseries)
+library(TSA)
+library(hts)
+library(fpp2)
+library(tsbox)
+rm(list = ls())
+gc()
+```
+
+# Import Data
+```{r}
+datapath = "/Volumes/SSD/TS-Project/data"
+
+# City, Type, Family
+train <- fread(file=paste(datapath,"subset/train_city_type_item.csv",sep="/"))
+test <- fread(file=paste(datapath,"subset/test_city_type_item.csv",sep="/"))
+
+# City, Store, Family
+train <- fread(file=paste(datapath,"subset/train_city_store_item.csv",sep="/"))
+test <- fread(file=paste(datapath,"subset/test_city_store_item.csv",sep="/"))
+```
+
+
+# Transform to Wide form
+```{r}
+train_wide = spread(train, hts_label, tot_sales)
+train_wide[is.na(train_wide)] = 0
+train_wide = train_wide %>%
+                  select(-city, -type, -family, -price, -n_promotion, -perishable, -national_flag,
+                         -holiday_flag, -pay.day_flag, -V1) %>%
+                  group_by(date) %>%
+                  summarise_all(funs(sum))
+train.ts = ts(train_wide[2:ncol(train_wide)], frequency=365.25, 
+     start = c(year("2013-01-01"), 1))
+```
+
+```{r}
+unique(test$date)
+```
+
+# Run HTS
+```{r}
+train.hts = hts(train.ts, characters = c(2, 1, 5))
+summary(grocery.hts)
+smatrix(grocery.hts)
+```
+
+# Plot HTS
+```{r}
+# Graph by City
+train.hts %>% aggts(levels=0:1) %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City")
+
+# Graph by Type
+  
+
+
+# Graph by Item Family
+
+```
+
+# Forecast - (P.S. - takes a while to run)
+```{r}
+# Middle Out
+pred = forecast(train.hts, method="mo", fmethod="arima", level = 1, h=16)
+plot(pred)
+```
+
+
+
+
+
+
