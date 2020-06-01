@@ -57,34 +57,141 @@ unique(test$date)
 # Run HTS
 ```{r}
 train.hts = hts(train.ts, characters = c(2, 1, 5))
-summary(grocery.hts)
-smatrix(grocery.hts)
+summary(train.hts)
+smatrix(train.hts)
 ```
 
 # Plot HTS
 ```{r}
+aggts1 <- aggts(train.hts, levels = 1) # City Level
+aggts2 <- aggts(train.hts, levels = c(0, 2)) # Type Level
+aggts3 <- aggts(train.hts, levels = c(0, 3)) # Item Family Level
+
 # Graph by City
 train.hts %>% aggts(levels=0:1) %>%
   autoplot(facet=TRUE) +
   xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City")
 
 # Graph by Type
-  
-
+train.hts %>% aggts(levels=0:2) %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City & Type")
 
 # Graph by Item Family
+# Graph by Store and Item Family
+fcsts <- aggts(comb, levels=0:3)
+groups <- aggts(data.hts, levels=0:3)
+autoplot(fcsts) + autolayer(groups)
+
 
 ```
 
-# Forecast - (P.S. - takes a while to run)
+# Train - Val Split
 ```{r}
-# Middle Out
-pred = forecast(train.hts, method="mo", fmethod="arima", level = 1, h=16)
-plot(pred)
+data.hts = window(train.hts, start = 2013, end = 2017.541) # 1659 dates
+summary(data.hts)
+val.hts = window(train.hts, start = 2017.542) # 20 dates
+summary(val.hts)
 ```
 
 
+# Base Model
+```{r}
+rw.top.down = forecast(
+  data.hts, h = 20, method = "tdfp", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+rw.bottom.up = forecast(
+  data.hts, h = 20, method = "bu", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+rw.middle.out = forecast(
+  data.hts, h = 20, method = "mo", fmethod = "rw", level = 2,
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+rw.comb = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+base_results = rbind(accuracy(rw.top.down$bts, val.hts$bts),
+                accuracy(rw.bottom.up$bts, val.hts$bts),
+                accuracy(rw.middle.out$bts, val.hts$bts),
+                accuracy(rw.comb$bts, val.hts$bts))
+rownames(base_results) = c("top.down",  "bottom.up",  "middle.out", "combination")
+base_results
+
+```
 
 
+# Forecast
+```{r}
+top.down = forecast(
+  data.hts, h = 20, method = "tdfp", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
 
+bottom.up = forecast(
+  data.hts, h = 20, method = "bu", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+middle.out = forecast(
+  data.hts, h = 20, method = "mo", fmethod = "arima", level = 2,
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+comb = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+
+comb_wls = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+comb_wls = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+comb_wls_alg = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls", algorithms = "lu",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+```
+
+
+```{r}
+mape.pct = function(y_actual, y_pred) {
+  error = mean(abs((y_actual - y_pred)/y_actual))
+  return(error*100)
+}
+
+results = rbind(accuracy(top.down$bts, val.hts$bts),
+                accuracy(bottom.up$bts, val.hts$bts),
+                accuracy(middle.out$bts, val.hts$bts),
+                accuracy(comb$bts, val.hts$bts),
+                accuracy(comb_wls$bts, val.hts$bts),
+                accuracy(comb_wls_alg$bts, val.hts$bts))
+rownames(results) = c("top.down",  "bottom.up",  "middle.out", 
+                      "combination", "comb_wls", "comb_wls_alg")
+results
+
+plot(comb, include = 1600)
+```
+
+
+```{r}
+data <- window(htseg2, start = 1992, end = 2002)
+holdout <- window(htseg2, start = 2003)
+fcasts <- forecast(data, h = 5, method = "bu", fmethod = "arima")
+acc = accuracy(fcasts, holdout)
+```
 
