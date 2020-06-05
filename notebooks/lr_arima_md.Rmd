@@ -1,0 +1,139 @@
+---
+title: "Linear Regression with Arima"
+author: "Meghna Diwan"
+date: "6/4/2020"
+output: html_document
+---
+
+```{r}
+library(forecast)
+library(tseries)
+library(lmtest)
+library(arfima)
+library(fracdiff)
+library(DBI)
+library(mltools)
+library(TSA)
+library(lubridate)
+library(tidyverse)
+rm(list = ls())
+gc()
+```
+
+# Import Data
+```{r}
+datapath = "/Volumes/SSD/TS-Project/data"
+
+# City, Type, Family
+train = read.csv(file=paste(datapath,"subset/train_city_type_item.csv",sep="/"))
+test = read.csv(file=paste(datapath,"subset/test_city_type_item.csv",sep="/"))
+```
+
+# Split Train-Validation
+```{r}
+test$date = as.Date(test$date)
+train$date = as.Date(train$date)
+dates = unique(train$date)
+tail(dates, 20)
+
+train_set = train %>%
+                dplyr::filter(date < as.Date("2017-07-27"))
+
+val_set = train %>%
+              dplyr::filter(date >= as.Date("2017-07-27"))
+
+train_set = within(train_set, rm('date','X','hts_label'))
+val_set = within(val_set, rm('date','X','hts_label'))
+```
+
+
+# Correlation Matrix
+```{r}
+cor(as.matrix(train_set[, 4:10]))
+
+# holiday and national are highly correlated, drop national flag
+```
+
+```{r}
+train_set = subset(train_set, select = -national_flag)
+val_set = subset(val_set, select = -national_flag)
+```
+
+
+# Linear Regression
+```{r}
+lr = lm(formula = tot_sales ~ ., data = train_set)
+summary(lr)
+acf(lr$residuals, 100)
+pacf(lr$residuals, 100)
+
+res_p = periodogram(lr$residuals)
+res_freq = res_p$freq[(res_p$spec > 5e+10)]
+1/res_freq
+
+Box.test(lr$residuals, type = 'Ljung-Box', lag=10, fitdf = 2)
+```
+
+# Arima with xreg
+```{r}
+sale_period = periodogram(train_set$tot_sales)
+sale_freq = sale_period$freq[(sale_period$spec > 2e+11)]
+1/sale_freq
+
+train_xreg = train_set[, c(1, 2, 3, 4, 5, 9)]
+#train_xreg = model.matrix(tot_sales ~ ., data=train_xreg)
+train_xreg = data.matrix(train_xreg)
+
+lr.arima = auto.arima(train_xreg[, 6], xreg = train_xreg[, c(1, 2, 3, 4, 5)])
+acf(lr.arima$residuals)
+periodogram(lr.arima$residuals)
+
+```
+
+# FOURIER
+```{r}
+sales = train %>% dplyr::group_by(date) %>% dplyr::summarise(sales = sum(tot_sales))
+minday = as.Date("2013-01-02")
+sales.ts = ts(sales$sales, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
+plot(sales.ts)
+p = periodogram(sales.ts)
+max_freq = p$freq[(p$spec > 1e+12)]
+1/max_freq
+
+oil.price = train %>% dplyr::group_by(date) %>% dplyr::summarise(price = mean(price))
+
+sales.arima = auto.arima(sales.ts, xreg = cbind(fourier(sales.ts, K=6), oil.price$price), seasonal = T)
+sales.arima
+acf(sales.arima$residuals)
+pacf(sales.arima$residuals)
+periodogram(sales.arima$residuals)
+
+```
+
+
+# Hybrid Models
+https://cran.r-project.org/web/packages/forecastHybrid/forecastHybrid.pdf
+https://robjhyndman.com/hyndsight/forecast-combinations/
+https://cran.r-project.org/web/packages/forecastHybrid/vignettes/forecastHybrid.html
+```{r}
+library(thief)
+library(forecastHybrid)
+
+hybrid = hybridModel(sales.ts)
+print(hybrid) 
+summary(hybrid)
+hybrid$weights 
+# acf(hybrid$residuals)
+
+hybrid$auto.arima
+hybrid$thetam
+hybrid$nnetar
+hybrid$stlm
+hybrid$tbats
+hybrid$residuals
+
+plot(hybrid, type = "fit")
+plot(hybrid, type = "models")
+```
+
+
