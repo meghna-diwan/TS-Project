@@ -30,10 +30,61 @@ datapath = "/Volumes/SSD/TS-Project/data"
 # City, Type, Family
 train <- fread(file=paste(datapath,"subset/train_city_type_item.csv",sep="/"))
 test <- fread(file=paste(datapath,"subset/test_city_type_item.csv",sep="/"))
+```
 
-# City, Store, Family
-train <- fread(file=paste(datapath,"subset/train_city_store_item.csv",sep="/"))
-test <- fread(file=paste(datapath,"subset/test_city_store_item.csv",sep="/"))
+# Plots for TS and Dates
+```{r}
+train %>%
+  mutate(date =  as.Date(date, "%Y-%m-%d")) %>%
+  group_by(date) %>%
+  summarise(sales = sum(tot_sales)) %>%
+  ggplot(aes(date, sales)) +
+  geom_line(color = "blue")
+
+train %>%
+  mutate(wday = wday(date, label = TRUE),
+         month = month(date, label = TRUE)) %>%
+  mutate(wday = fct_relevel(wday, c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))) %>%
+  group_by(wday, month) %>%
+  summarise(mean_sales = mean(tot_sales)) %>%
+  ggplot(aes(month, wday, fill = mean_sales)) +
+  geom_tile() +
+  labs(x = "Month of the year", y = "Day of the week") +
+  scale_fill_distiller(palette = "Spectral")
+```
+
+# Plot by Type
+```{r}
+train %>%
+  mutate(date =  as.Date(date, "%Y-%m-%d")) %>%
+  group_by(date, type) %>%
+  summarise(sales = sum(tot_sales)) %>%
+  filter(sales > 600) %>%
+  ggplot(aes(date, sales, color = type)) +
+  geom_line()
+```
+
+# Plot Oil price
+```{r}
+train %>%
+  mutate(date =  as.Date(date, "%Y-%m-%d")) %>%
+  group_by(date) %>%
+  summarise(sales = sum(tot_sales), price = mean(price)) %>%
+  mutate(oilprice = ( min(sales, na.rm = TRUE) + (price-min(price, na.rm=TRUE)) / (max(price, na.rm = TRUE) - min(price, na.rm = TRUE)) * (max(sales, na.rm = TRUE) - min(sales, na.rm = TRUE)) )) %>%
+  ggplot(aes(date, sales)) +
+  geom_line() +
+  geom_line(aes(date, oilprice), color = "blue") +
+  ggtitle("Total sales (black) with oilprice (blue)")
+```
+
+
+# Plot of Perishables
+```{r}
+train %>%
+  ggplot(aes(family, fill = perishable)) +
+  geom_bar(position = "fill") +
+  coord_flip() +
+  labs(y = "Total perishable proportion", x = "")
 ```
 
 
@@ -82,8 +133,6 @@ train.hts %>% aggts(levels=0:2) %>%
 fcsts <- aggts(comb, levels=0:3)
 groups <- aggts(data.hts, levels=0:3)
 autoplot(fcsts) + autolayer(groups)
-
-
 ```
 
 # Train - Val Split
@@ -94,6 +143,48 @@ val.hts = window(train.hts, start = 2017.542) # 20 dates
 summary(val.hts)
 ```
 
+# Visualization of the train-test split
+```{r}
+train_dt <- train %>%
+  distinct(date) %>%
+  head(-20) %>%
+  mutate(dset = "train")
+
+val_dt <- train %>%
+  distinct(date) %>%
+  tail(20) %>%
+  mutate(dset = "validation")
+
+test_dt <- test %>%
+  distinct(date) %>%
+  mutate(dset = "test")
+
+train_dt <- train_dt %>%
+  bind_rows(val_dt) %>%
+  bind_rows(test_dt) %>%
+  mutate(year = year(date))
+
+train_dt$date = ymd(as.Date(train_dt$date, "%Y-%m-%d"))
+year(train_dt$date) = 2017
+
+train_dt %>%
+  filter(!is.na(date)) %>%
+  ggplot(aes(date, year, color = dset)) +
+  geom_point(shape = "|", size = 10) +
+  scale_x_date(date_labels = "%B", date_breaks = "1 month") +
+  scale_y_reverse() +
+  theme(legend.position = "bottom", axis.text.x  = element_text(angle=45, hjust=1, vjust=0.9)) +
+  labs(color = "Data set") +
+  guides(color = guide_legend(override.aes = list(size = 4, pch = 15)))
+```
+
+# SMAPE
+```{r}
+smape = function(y_pred, y_actual) {
+  error = mean(abs(y_pred - y_actual)/(abs(y_actual) + abs(y_pred)))
+  return(error)
+}
+```
 
 # Base Model
 ```{r}
@@ -117,10 +208,24 @@ rw.comb = forecast(
   keep.fitted = TRUE, keep.resid = TRUE
 )
 
-base_results = rbind(accuracy(rw.top.down$bts, val.hts$bts),
-                accuracy(rw.bottom.up$bts, val.hts$bts),
-                accuracy(rw.middle.out$bts, val.hts$bts),
-                accuracy(rw.comb$bts, val.hts$bts))
+
+# Forecasting Benchmarks
+
+# - meanf: simply take the mean
+#- naive: use last value
+#- snaive: seasonal naive, take the value of the last same season
+#- rwf: random walk forecast, use drift
+
+# data.hts %>% meanf(h=20) %>% autoplot
+# goog %>% naive(h=20) %>% autoplot
+# data.hts %>% snaive(h=20) %>% autoplot
+# goog %>% rwf(drift=TRUE, h=50) %>% autoplot
+
+
+base_results = rbind(smape(rw.top.down$bts, val.hts$bts),
+                smape(rw.bottom.up$bts, val.hts$bts),
+                smape(rw.middle.out$bts, val.hts$bts),
+                smape(rw.comb$bts, val.hts$bts))
 rownames(base_results) = c("top.down",  "bottom.up",  "middle.out", "combination")
 base_results
 
@@ -149,45 +254,82 @@ comb = forecast(
   keep.fitted = TRUE, keep.resid = TRUE
 )
 
-
 comb_wls = forecast(
   data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls",
   keep.fitted = TRUE, keep.resid = TRUE
 )
-
-comb_wls = forecast(
-  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls",
-  keep.fitted = TRUE, keep.resid = TRUE
-)
-
+ 
 comb_wls_alg = forecast(
   data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls", algorithms = "lu",
   keep.fitted = TRUE, keep.resid = TRUE
 )
 
+comb_nseries = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "nseries",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+```
+
+## SMAPE Errors
+```{r}
+results = rbind(smape(top.down$bts, val.hts$bts),
+                smape(bottom.up$bts, val.hts$bts),
+                smape(middle.out$bts, val.hts$bts),
+                smape(comb$bts, val.hts$bts),
+                smape(comb_wls$bts, val.hts$bts),
+                smape(comb_wls_alg$bts, val.hts$bts), 
+                smape(comb_nseries$bts, val.hts$bts))
+rownames(results) = c("top.down",  "bottom.up",  "middle.out", 
+                      "combination", "comb_wls", "comb_wls_alg", "comb_nseries")
+results
+```
+
+## CV
+```{r}
+hts.CV = function(y, window, h) {
+  cv.error = matrix(ncol = 1)
+  
+  for (i in seq(1, nrow(y) - (window + h) + 1)) {
+    train_start = i
+    train_end = i + window - 1
+    test_start = i + window
+    test_end = i + window + h - 1
+    #print("/n")
+    #cat(train_start, train_end, test_start, test_end, sep = " ")
+    train_y = subset(y, start = train_start, end = train_end)
+    #print(nrow(train_y))
+    test_y = subset(y, start = test_start, end = test_end)
+    #print(nrow(test_y))
+    
+    train_hts = hts(train_y, characters = c(2, 1, 5))
+    test_hts = hts(test_y, characters = c(2, 1, 5))
+    
+    fc = forecast(train_hts, h = h, method = "comb", fmethod = "arima", weights = "wls",
+    keep.fitted = TRUE, keep.resid = TRUE)
+    print(paste("Done", as.character(i)))
+    acc = smape(fc$bts, test_hts$bts)
+    cv.error = rbind(cv.error, acc)
+  }
+  
+  return(cv.error)
+}
 ```
 
 
 ```{r}
-mape.pct = function(y_actual, y_pred) {
-  error = mean(abs((y_actual - y_pred)/y_actual))
-  return(error*100)
-}
-
-results = rbind(accuracy(top.down$bts, val.hts$bts),
-                accuracy(bottom.up$bts, val.hts$bts),
-                accuracy(middle.out$bts, val.hts$bts),
-                accuracy(comb$bts, val.hts$bts),
-                accuracy(comb_wls$bts, val.hts$bts),
-                accuracy(comb_wls_alg$bts, val.hts$bts))
-rownames(results) = c("top.down",  "bottom.up",  "middle.out", 
-                      "combination", "comb_wls", "comb_wls_alg")
-results
-
-plot(comb, include = 1600)
+start.time <- Sys.time()
+cv.acc = hts.CV(y = train.ts, window = 1640, h = 30) # takes 11 mins to run one cv
+end.time <- Sys.time()
+(time.taken <- end.time - start.time)
 ```
 
+```{r}
+mean(cv.acc, na.rm = T)
+sd(cv.acc, na.rm = T)
+```
 
+# HTS FORECAST - EXAMPLE
 ```{r}
 data <- window(htseg2, start = 1992, end = 2002)
 holdout <- window(htseg2, start = 2003)
