@@ -1,5 +1,5 @@
 ---
-title: "models"
+title: "HTS Models"
 author: "Meghna Diwan"
 date: "5/29/2020"
 output: html_document
@@ -114,25 +114,25 @@ smatrix(train.hts)
 
 # Plot HTS
 ```{r}
-aggts1 <- aggts(train.hts, levels = 1) # City Level
-aggts2 <- aggts(train.hts, levels = c(0, 2)) # Type Level
-aggts3 <- aggts(train.hts, levels = c(0, 3)) # Item Family Level
-
-# Graph by City
-train.hts %>% aggts(levels=0:1) %>%
-  autoplot(facet=TRUE) +
-  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City")
-
-# Graph by Type
-train.hts %>% aggts(levels=0:2) %>%
-  autoplot(facet=TRUE) +
-  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City & Type")
-
-# Graph by Item Family
-# Graph by Store and Item Family
-fcsts <- aggts(comb, levels=0:3)
-groups <- aggts(data.hts, levels=0:3)
-autoplot(fcsts) + autolayer(groups)
+# aggts1 <- aggts(train.hts, levels = 1) # City Level
+# aggts2 <- aggts(train.hts, levels = c(0, 2)) # Type Level
+# aggts3 <- aggts(train.hts, levels = c(0, 3)) # Item Family Level
+# 
+# # Graph by City
+# train.hts %>% aggts(levels=0:1) %>%
+#   autoplot(facet=TRUE) +
+#   xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City")
+# 
+# # Graph by Type
+# train.hts %>% aggts(levels=0:2) %>%
+#   autoplot(facet=TRUE) +
+#   xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City & Type")
+# 
+# # Graph by Item Family
+# # Graph by Store and Item Family
+# fcsts <- aggts(comb, levels=0:3)
+# groups <- aggts(data.hts, levels=0:3)
+# autoplot(fcsts) + autolayer(groups)
 ```
 
 # Train - Val Split
@@ -328,12 +328,3 @@ end.time <- Sys.time()
 mean(cv.acc, na.rm = T)
 sd(cv.acc, na.rm = T)
 ```
-
-# HTS FORECAST - EXAMPLE
-```{r}
-data <- window(htseg2, start = 1992, end = 2002)
-holdout <- window(htseg2, start = 2003)
-fcasts <- forecast(data, h = 5, method = "bu", fmethod = "arima")
-acc = accuracy(fcasts, holdout)
-```
-
