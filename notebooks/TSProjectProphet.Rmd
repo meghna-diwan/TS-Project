@@ -1,0 +1,194 @@
+---
+title: "TSProjectProphet"
+author: "Jinyi (Jenny) Huang"
+date: "6/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+train <- read.csv('/Users/jenny.huang/Downloads/train_city_type_item.csv')
+test <- read.csv('/Users/jenny.huang/Downloads/test_city_type_item.csv')
+```
+
+```{r}
+library(TSA)
+library(hts)
+library(tidyverse)
+library(lubridate)
+library(prophet)
+library(ggplot2)
+library(plotly)
+```
+
+```{r}
+# Transform to wide form
+train_wide = spread(train, hts_label, tot_sales)
+train_wide[is.na(train_wide)] = 0
+train_wide = train_wide %>%
+                  select(-city, -type, -family, -price, -n_promotion, -perishable, -national_flag, -pay.day_flag) %>%
+                  group_by(date) %>%
+                  summarise_all(funs(sum))
+train.ts = ts(train_wide[2:ncol(train_wide)], frequency=365.25, 
+     start = c(year("2013-01-01"), 1))
+```
+
+```{r}
+# Adding total sales column to data and prepare for prophet
+train.prophet <- train_wide[,-2]
+Tot_Sales <- rowSums(train.prophet[,-c(1,2)])
+holidays <- train.prophet[,c(1,2)]
+train.prophet <- cbind(train.prophet[,1],Tot_Sales)
+
+# Split into training and validation (use last 20 days as validation data)
+n <- nrow(train.prophet)
+train.valid <- train.prophet[(n-19):n, ]
+colnames(train.valid) <- c("date","y")
+train.valid$date <- as.Date(train.valid$date)
+train.real <- train.prophet[1:(n-20), ]
+# Preparing for prophet
+train.real$date <- as.Date(train.real$date)
+colnames(train.real) <- c("ds","y")
+
+# Running prophet with no parameters set
+train.pro <- prophet(train.real)
+future <- make_future_dataframe(train.pro, periods = 20)
+result_pro <- predict(train.pro,future)
+
+# plot to see how well the model predicted validation data
+# red is predicted; black is actual
+plot1 <- ggplot()+
+geom_line(data = result_pro %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "red")+
+geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
+  scale_x_date(labels = scales::date_format("%b %d"),
+    breaks = scales::date_breaks("1 day"))+
+  theme_minimal()+
+  theme(
+    axis.text.x = element_text(angle = 45),
+    legend.position = "bottom"
+  )
+
+ggplotly(plot1 , dynamicTicks = TRUE)
+```
+
+```{r}
+# Making the model better
+
+# 1. Taking holiday into account; I already constructed a holidays table earlier
+colnames(holidays) <- c("ds","holiday")
+holidays$holiday <- as.character(holidays$holiday)
+
+train.pro.new <- prophet(train.real,holidays = holidays)
+future <- make_future_dataframe(train.pro.new, periods = 20)
+result.pro.new <- predict(train.pro.new,future)
+
+# plot to see if the model improved
+# black is actual; green is old; red is new
+plot2 <- ggplot()+
+geom_line(data = result.pro.new %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "red")+
+geom_line(data = result_pro %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "green")+
+geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
+  scale_x_date(labels = scales::date_format("%b %d"),
+    breaks = scales::date_breaks("1 day"))+
+  theme_minimal()+
+  theme(
+    axis.text.x = element_text(angle = 45),
+    legend.position = "bottom"
+  )
+
+ggplotly(plot2 , dynamicTicks = TRUE)
+
+# The model did worse, so I'm going to remove holiday data from the model
+```
+```{r}
+# 2. Changing seasonality.mode to multiplicative
+train.pro.new2 <- prophet(train.real, seasonality.mode = "multiplicative")
+future <- make_future_dataframe(train.pro.new2, periods = 20)
+result.pro.new2 <- predict(train.pro.new2,future)
+
+# plot to see if the model improved
+# black is actual; green is old; red is new
+plot2 <- ggplot()+
+geom_line(data = result.pro.new2 %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "red")+
+geom_line(data = result.pro.new %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "green")+
+geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
+  scale_x_date(labels = scales::date_format("%b %d"),
+    breaks = scales::date_breaks("1 day"))+
+  theme_minimal()+
+  theme(
+    axis.text.x = element_text(angle = 45),
+    legend.position = "bottom"
+  )
+
+ggplotly(plot2 , dynamicTicks = TRUE)
+```
+
+
+```{r}
+# 2. Change point scale
+# reference: https://www.kaggle.com/holdenyau/prophet/code
+result <- data.frame(scale = 1:10 , traing_RMSE = 1: 10 , valid_RMSE = 1:10)
+for (i in 1:10){
+  train.pro.opt <- prophet(train.real, changepoint.prior.scale = i/100)
+  future <- make_future_dataframe(train.pro.opt, periods = 20)
+result.pro.opt <- predict( train.pro.opt , future)  
+ v_traing <- accuracy(result.pro.opt$yhat[1:1659] , train.real$y )[2]
+ v_valid  <- accuracy(result.pro.opt$yhat[1660:1679] , train.valid$y )[2]
+ result$scale[i] <- i/100
+ result$traing_RMSE[i] <- v_traing
+ result$valid_RMSE[i] <- v_valid
+}
+
+result %>%
+  gather(`traing_RMSE` , `valid_RMSE` , key = "type" , value = "RMSE") %>%
+  ggplot()+
+    geom_point(aes(x = scale , y = RMSE , col = type))+
+    geom_line( aes(x = scale , y = RMSE , group = type))+
+  theme_minimal()+
+  theme(legend.position = "bottom")
+
+plot3 <- ggplot()+
+geom_line(data = result.pro.opt %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "red")+
+geom_line(data = result_pro %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "green")+
+geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
+  scale_x_date(labels = scales::date_format("%b %d"),
+    breaks = scales::date_breaks("1 day"))+
+  theme_minimal()+
+  theme(
+    axis.text.x = element_text(angle = 45),
+    legend.position = "bottom"
+  )
+
+ggplotly(plot3 , dynamicTicks = TRUE)
+```
+
+
+```{r}
+# smape of validation data
+library(Metrics)
+smape(train.valid$y,result_pro$yhat %>% tail(20))
+smape(train.valid$y,result.pro.opt$yhat %>% tail(20))
+```
+```{r}
+# Preparing proportion table for splitting forecast data to sub time series
+train.proportion <- train_wide[,-c(2,3)]
+Tot_Sales <- rowSums(train.proportion[,-1])
+train.proportion <- cbind(train.proportion, Tot_Sales)
+for (i in 2:47){
+  for (j in 1:1679){
+    train.proportion[j,i] <- train.proportion[j,i]/train.proportion[j,47]
+  }
+}
+
+# Assigning forecasted value based on proportions and total sales
+for (i in 2:47){
+  for (j in 1:1679){
+    train.proportion[j,i] <- result_pro$yhat[j]*train.proportion[j,i]
+  }
+}
+
+# smape for each column will be the same as the total
+```
