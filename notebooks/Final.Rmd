@@ -20,9 +20,6 @@ library(TSPred)
 dataPath = "/Users/Leovainlove/Desktop"
 train1 <- read.csv(paste(dataPath,'train_city_type_item.csv',sep="/"))
 test1 <- read.csv(paste(dataPath,'test_city_type_item.csv',sep="/"))
-
-
-
 ```
 
 ```{r}
@@ -163,7 +160,8 @@ head(sales)
 ```
 
 ```{r}
-total_sales.arima = auto.arima(sales.ts, xreg = cbind(fourier(sales.ts, K=5), oil.price$price), seasonal = T)
+total_sales.arima = auto.arima(sales.ts, xreg = cbind(fourier(sales.ts, K=5), oil.price$price), 
+                               seasonal = T)
 total_sales.arima
 acf(total_sales.arima$residuals)
 pacf(total_sales.arima$residuals)
@@ -171,10 +169,11 @@ periodogram(total_sales.arima$residuals)
 ```
 
 ```{r}
-sales_train = sales %>%
-                dplyr::filter(date < as.Date("2017-07-27"))
-sales_val = sales %>%
-              dplyr::filter(date >= as.Date("2017-07-27"))
+#sales_train = sales %>% dplyr::filter(date < as.Date("2017-07-27"))
+#sales_val = sales %>% dplyr::filter(date >= as.Date("2017-07-27"))
+
+sales_train = head(sales, -20)
+sales_val = tail(sales, 20)
 ```
 
 
@@ -196,7 +195,6 @@ sales_am <- auto.arima(sales_train$sales, xreg=cbind(fourier(sales_train.ts, K=5
 sales_am_res <- sales_am$residuals
 acf(sales_am_res)
 pacf(sales_am_res)
-
 ```
 
 ```{r}
@@ -225,13 +223,15 @@ smape = function(y_pred, y_actual) {
 
 smape(pred2$mean, sales_val$sales)
 
-autoplot(pred) + ylab("Total_Sales")
+autoplot(pred2) + ylab("Total_Sales")
 ```
+
 ```{r}
 train_wide = spread(train1, hts_label, tot_sales)
 train_wide[is.na(train_wide)] = 0
 train_wide = train_wide %>%
-                  select(-city, -type, -family, -price, -n_promotion, -perishable, -national_flag, -pay.day_flag) %>%
+                  select(-city, -type, -family, -price, -n_promotion, 
+                         -perishable, -national_flag, -pay.day_flag) %>%
                   group_by(date) %>%
                   summarise_all(funs(sum))
 head(train_wide)
@@ -249,7 +249,6 @@ for (i in 2:47){
 }
   
 ```
-
 
 
 ```{r}
@@ -280,17 +279,26 @@ head(prop_val)
 
 
 ```{r}
-#(minday = as.Date("2013-01-02")
-#ts= matrix()
-#am= matrix()
-#pred= matrix()
-#for (i in 2:46){
-    #ts[i,] = ts(prop_train[,i], start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
-   # am[i,] = auto.arima(ts[i], seasonal=TRUE)
-    #pred[i,] = forecast(am[i], h=20)
-    
-#})
+(minday = as.Date("2013-01-02"))
+am= list()
+pred= list()
+pred_prop_matrix = matrix(nrow = 20, ncol = 45)
+ts =  ts(prop_train, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
 
+for (i in 1:45) {
+    am[[i]] = auto.arima(ts[, i+1], seasonal=TRUE)
+    pred[[i]] = forecast(am[[i]], h=20)
+    pred_prop_matrix[, i] =  pred[[1]]$mean
+}
 
+# smape for proportions
+smape(pred_prop_matrix, as.matrix(prop_val[, 2:46]))
+
+# smape for sales across the groups
+tot_pred = replicate(45, pred2$mean)
+val_pred = pred_prop_matrix*tot_pred
+val_actual = as.matrix(tail(train_wide[, 4:48], 20))
+
+smape(val_pred, val_actual)
 ```
 

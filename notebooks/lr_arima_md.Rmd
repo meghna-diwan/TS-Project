@@ -42,14 +42,14 @@ train_set = train %>%
 val_set = train %>%
               dplyr::filter(date >= as.Date("2017-07-27"))
 
-train_set = within(train_set, rm('date','X','hts_label'))
-val_set = within(val_set, rm('date','X','hts_label'))
+train_set = within(train_set, rm('X','hts_label'))
+val_set = within(val_set, rm('X','hts_label'))
 ```
 
 
 # Correlation Matrix
 ```{r}
-cor(as.matrix(train_set[, 4:10]))
+cor(as.matrix(train_set[, 5:10]))
 
 # holiday and national are highly correlated, drop national flag
 ```
@@ -59,38 +59,98 @@ train_set = subset(train_set, select = -national_flag)
 val_set = subset(val_set, select = -national_flag)
 ```
 
+# SMAPE
+```{r}
+smape = function(y_pred, y_actual) {
+  error = mean(abs(y_pred - y_actual)/(abs(y_actual) + abs(y_pred)))
+  return(error)
+}
+```
+
+```{r}
+fit = stl(sales.ts, s.window = "periodic", robust = T)
+plot(fit)
+fit$time.series[, "remainder"]
+acf(fit$time.series[, "remainder"])
+```
+
 
 # Linear Regression
 ```{r}
-lr = lm(formula = tot_sales ~ ., data = train_set)
+lr = lm(formula = tot_sales ~ ., data = train_set[, c(-1, -7)]) # removed perishables
 summary(lr)
+
+# residuals
+checkresiduals(lr$residuals)
 acf(lr$residuals, 100)
 pacf(lr$residuals, 100)
+Box.test(lr$residuals, type = 'Ljung-Box', lag=10, fitdf = 2)
 
 res_p = periodogram(lr$residuals)
 res_freq = res_p$freq[(res_p$spec > 5e+10)]
 1/res_freq
 
-Box.test(lr$residuals, type = 'Ljung-Box', lag=10, fitdf = 2)
+# predict
+pred = predict(lr, val_set[, c(-1,-7, -10)])
+(score = smape(pred, val_set$tot_sales))
 ```
 
 # Arima with xreg
 ```{r}
-sale_period = periodogram(train_set$tot_sales)
-sale_freq = sale_period$freq[(sale_period$spec > 2e+11)]
-1/sale_freq
+# seasonality from total sales
+sales = train %>% dplyr::group_by(date) %>% dplyr::summarise(sales = sum(tot_sales))
+minday = as.Date("2013-01-02")
+sales.ts = ts(sales$sales, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
+plot(sales.ts)
+p = periodogram(sales.ts)
+max_freq = p$freq[(p$spec > 1e+12)]
+1/max_freq
 
-train_xreg = train_set[, c(1, 2, 3, 4, 5, 9)]
-#train_xreg = model.matrix(tot_sales ~ ., data=train_xreg)
-train_xreg = data.matrix(train_xreg)
+sales_four = as.data.frame(fourier(sales.ts, K=3))
+sales_four$date = sales$date
+train_xreg = train_set[, c("date", "price", "n_promotion", "perishable")]
+x = inner_join(train_xreg, sales_four) %>% select(-date)
+x = data.matrix(x)
 
-lr.arima = auto.arima(train_xreg[, 6], xreg = train_xreg[, c(1, 2, 3, 4, 5)])
+train_xreg = model.matrix(tot_sales ~ ., data=train_set[, c(2, 3, 4, 5, 6, 10)])
+train_xreg = as.data.frame(train_xreg)
+train_xreg$date = train_set$date
+train_xreg = inner_join(train_xreg, sales_four)
+train_xreg = as.matrix(train_xreg[, c(-1, -14)])
+#train_xreg = data.matrix(train_xreg)
+
+lr.arima = auto.arima(train_set$tot_sales, xreg = train_xreg, seasonal = T)
+summary(lr.arima)
+lr.arima$aic
+
+# residuals
+checkresiduals(lr.arima$residuals)
 acf(lr.arima$residuals)
+pacf(lr.arima$residuals)
+Box.test(lr.arima$residuals, type = 'Ljung-Box', lag=10, fitdf = 2)
 periodogram(lr.arima$residuals)
+
+# predict
+val_xreg = model.matrix(tot_sales ~ ., data=val_set[, c(2, 3, 4, 5, 6, 10)])
+val_xreg = as.data.frame(val_xreg)
+val_xreg$date = val_set$date
+val_xreg = inner_join(val_xreg, sales_four)
+val_xreg = as.matrix(val_xreg[, c(-1, -14)])
+
+lr.arima.fct = forecast(lr.arima, xreg = val_xreg , h = 900)
+(arima.score = smape(lr.arima.fct$mean, val_set$tot_sales))
+plot(lr.arima.fct)
 
 ```
 
-# FOURIER
+# NN on Residuals
+```{r}
+resd_nn = nnetar(lr.arima$residuals, MaxNWts=84581)
+acf()
+```
+
+
+# FOURIER ON TOTAL SALES
 ```{r}
 sales = train %>% dplyr::group_by(date) %>% dplyr::summarise(sales = sum(tot_sales))
 minday = as.Date("2013-01-02")
@@ -100,14 +160,22 @@ p = periodogram(sales.ts)
 max_freq = p$freq[(p$spec > 1e+12)]
 1/max_freq
 
-oil.price = train %>% dplyr::group_by(date) %>% dplyr::summarise(price = mean(price))
+sales_four = fourier(sales.ts, K=4)
 
-sales.arima = auto.arima(sales.ts, xreg = cbind(fourier(sales.ts, K=6), oil.price$price), seasonal = T)
-sales.arima
+oil.price = train %>% dplyr::group_by(date) %>% 
+  dplyr::summarise(price = mean(price), promo = sum(n_promotion))
+
+sales.arima = auto.arima(sales.ts, 
+                         xreg = cbind(fourier(sales.ts, K=4), oil.price$price, oil.price$promo), 
+                         seasonal = T)
+# sales.arima
+sales.arima$aicc
 acf(sales.arima$residuals)
 pacf(sales.arima$residuals)
 periodogram(sales.arima$residuals)
+Box.test(sales.arima$residuals, type = 'Ljung-Box', lag=10)
 
+checkresiduals(sales.arima$residuals) 
 ```
 
 
@@ -119,11 +187,16 @@ https://cran.r-project.org/web/packages/forecastHybrid/vignettes/forecastHybrid.
 library(thief)
 library(forecastHybrid)
 
-hybrid = hybridModel(sales.ts)
+train.ts = head(sales.ts, -20)
+val.ts = tail(sales.ts, 20)
+
+hybrid = hybridModel(train.ts, weights = "cv.errors", errorMethod = 'RMSE',  
+                     windowSize = 30, horizonAverage = TRUE)
 print(hybrid) 
 summary(hybrid)
 hybrid$weights 
-# acf(hybrid$residuals)
+acf(hybrid$residuals, na.action	= na.pass)
+pacf(hybrid$residuals, na.action	= na.pass)
 
 hybrid$auto.arima
 hybrid$thetam

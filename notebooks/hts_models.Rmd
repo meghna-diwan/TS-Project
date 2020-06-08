@@ -94,7 +94,7 @@ train_wide = spread(train, hts_label, tot_sales)
 train_wide[is.na(train_wide)] = 0
 train_wide = train_wide %>%
                   select(-city, -type, -family, -price, -n_promotion, -perishable, -national_flag,
-                         -holiday_flag, -pay.day_flag, -V1) %>%
+                         -holiday_flag, -pay.day_flag) %>%
                   group_by(date) %>%
                   summarise_all(funs(sum))
 train.ts = ts(train_wide[2:ncol(train_wide)], frequency=365.25, 
