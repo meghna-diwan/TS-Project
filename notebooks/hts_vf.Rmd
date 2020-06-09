@@ -1,0 +1,396 @@
+---
+title: "Hierarchical Time Series"
+author: "Aarti Rao, Grace Chai, Jenny Huang, Meghna Diwan"
+date: "6/9/2020"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, echo=TRUE, warning=FALSE, message=FALSE, fig.keep = 'all')
+```
+
+
+```{r message=FALSE, warning=FALSE}
+library(data.table)
+library(tidyverse)
+library(lubridate)
+library(xts)
+library(leaflet)
+library(ggfortify)
+library(tidyquant)
+library(forecast)
+library(tseries)
+library(TSA)
+library(hts)
+library(fpp2)
+library(tsbox)
+rm(list = ls())
+gc()
+```
+
+# Import Data
+```{r}
+datapath = "C:/Users/aarti/Documents/Time Series Group Project"
+# City, Type, Family
+train <- fread(file=paste(datapath,"train_city_type_item.csv",sep="/"))
+test <- fread(file=paste(datapath,"test_city_type_item.csv",sep="/"))
+```
+
+
+# Transform to Wide form
+```{r}
+train_wide = spread(train, hts_label, tot_sales)
+train_wide[is.na(train_wide)] = 0
+train_wide = train_wide %>%
+                  select(-city, -type, -family, -price, -n_promotion, -perishable, -national_flag,
+                         -holiday_flag, -pay.day_flag, -V1) %>%
+                  group_by(date) %>%
+                  summarise_all(funs(sum))
+train.ts = ts(train_wide[2:ncol(train_wide)], frequency=365.25, 
+     start = c(year("2013-01-01"), 1))
+```
+
+```{r}
+unique(test$date)
+```
+
+# Run HTS
+```{r}
+train.hts = hts(train.ts, characters = c(2, 1, 5))
+summary(train.hts)
+smatrix(train.hts)
+```
+
+# Plot HTS
+```{r}
+# Graph by City
+train.hts %>% aggts(levels=0:1) %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City")
+```
+
+```{r}
+# Graph by Type - City Guayaquil
+aggts(train.hts, levels=1:2)[,c(1,3:7)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City & Type - Guayaquil")
+```
+
+```{r}
+# Graph by Type - City Quito
+aggts(train.hts, levels=1:2)[,c(2,8:11)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City & Type - Quito")
+```
+
+```{r}
+# Graph by Item Family - Type A, City Guayaquil
+aggts(train.hts, levels=2:3)[,c(1,10:14)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Guayaquil Type A")
+```
+
+```{r}
+# Graph by Item Family - Type B, City Guayaquil
+aggts(train.hts, levels=2:3)[,c(2,15:19)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Guayaquil Type B")
+```
+
+```{r}
+# Graph by Item Family - Type C, City Guayaquil
+aggts(train.hts, levels=2:3)[,c(3,20:24)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Guayaquil Type C")
+```
+
+```{r}
+# Graph by Item Family - Type D, City Guayaquil
+aggts(train.hts, levels=2:3)[,c(4,25:29)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Guayaquil Type D")
+```
+
+```{r}
+# Graph by Item Family - Type E, City Guayaquil
+aggts(train.hts, levels=2:3)[,c(5,30:34)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Guayaquil Type E")
+```
+
+```{r}
+# Graph by Item Family - Type A, City Quito
+aggts(train.hts, levels=2:3)[,c(6,35:39)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Quito Type A")
+```
+
+```{r}
+# Graph by Item Family - Type B, City Quito
+aggts(train.hts, levels=2:3)[,c(7,40:44)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Quito Type B")
+```
+
+```{r}
+# Graph by Item Family - Type C, City Quito
+aggts(train.hts, levels=2:3)[,c(8,45:49)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Quito Type C")
+```
+
+```{r}
+# Graph by Item Family - Type D, City Quito
+aggts(train.hts, levels=2:3)[,c(9,50:54)] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Grocery Sales by City, Type & Item Family - Quito Type D")
+
+```
+
+# Train - Val Split
+```{r}
+data.hts = window(train.hts, start = 2013, end = 2017.541) # 1659 dates
+summary(data.hts)
+```
+
+```{r}
+val.hts = window(train.hts, start = 2017.542) # 20 dates
+summary(val.hts)
+```
+
+# SMAPE
+```{r}
+smape = function(y_pred, y_actual) {
+  error = mean(abs(y_pred - y_actual)/(abs(y_actual) + abs(y_pred)))
+  return(error)
+}
+```
+
+# Base Model forecast -  Randwom Walk
+```{r}
+rw.top.down = forecast(
+  data.hts, h = 20, method = "tdfp", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+rw.bottom.up = forecast(
+  data.hts, h = 20, method = "bu", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+rw.middle.out = forecast(
+  data.hts, h = 20, method = "mo", fmethod = "rw", level = 2,
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+rw.comb = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+base_results = rbind(smape(rw.top.down$bts, val.hts$bts),
+                smape(rw.bottom.up$bts, val.hts$bts),
+                smape(rw.middle.out$bts, val.hts$bts),
+                smape(rw.comb$bts, val.hts$bts))
+rownames(base_results) = c("top.down",  "bottom.up",  "middle.out", "combination")
+base_results
+```
+
+# Base model plots - rw.top.down
+```{r}
+rw.top.down$bts[,1:5] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Forecasted Grocery Sales by City, Type & Item Family - Guayaquil Type A")+
+  ylim(800,10000)
+
+val.hts$bts[,1:5] %>%
+  autoplot(facet=TRUE, color='red')+
+  xlab("Year") + ylab("Total Sales") + ggtitle("Actual Grocery Sales by City, Type & Item Family - Guayaquil Type A")+
+  ylim(800,10000)
+
+```
+
+
+# Base model plots - rw.top.down
+```{r}
+rw.top.down$bts[,26:30] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Forecasted Grocery Sales by City, Type & Item Family - Quinto Type A")+
+  ylim(8000,87000)
+
+val.hts$bts[,26:30] %>%
+  autoplot(facet=TRUE, color='red')+
+  xlab("Year") + ylab("Total Sales") + ggtitle("Actual Grocery Sales by City, Type & Item Family - Quinto Type A")+
+  ylim(8000,87000)
+
+```
+
+# Forecast - Arima
+```{r}
+top.down = forecast(
+  data.hts, h = 20, method = "tdfp", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+bottom.up = forecast(
+  data.hts, h = 20, method = "bu", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+middle.out = forecast(
+  data.hts, h = 20, method = "mo", fmethod = "arima", level = 2,
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+comb = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+comb_wls = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+comb_wls_alg = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls", algorithms = "lu",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+```
+
+
+```{r}
+results = rbind(smape(top.down$bts, val.hts$bts),
+                smape(bottom.up$bts, val.hts$bts),
+                smape(middle.out$bts, val.hts$bts),
+                smape(comb$bts, val.hts$bts),
+                smape(comb_wls$bts, val.hts$bts),
+                smape(comb_wls_alg$bts, val.hts$bts))
+rownames(results) = c("top.down",  "bottom.up",  "middle.out", 
+                      "combination", "comb_wls", "comb_wls_alg")
+results
+```
+
+
+# Forecast Plots - Arima 
+```{r}
+comb$bts[,1:5] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Forecasted Grocery Sales by City, Type & Item Family - Guayaquil Type A")+
+  ylim(800,10000)
+
+val.hts$bts[,1:5] %>%
+  autoplot(facet=TRUE, color='red')+
+  xlab("Year") + ylab("Total Sales") + ggtitle("Actual Grocery Sales by City, Type & Item Family - Guayaquil Type A")+
+  ylim(800,10000)
+
+```
+
+
+# Forecast Plots - Arima 
+```{r}
+comb$bts[,26:30] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Forecasted Grocery Sales by City, Type & Item Family - Quinto Type A")+
+  ylim(8000,90000)
+
+val.hts$bts[,26:30] %>%
+  autoplot(facet=TRUE, color='red')+
+  xlab("Year") + ylab("Total Sales") + ggtitle("Actual Grocery Sales by City, Type & Item Family - Quinto Type A")+
+  ylim(8000,90000)
+
+```
+
+# Forecast - Arima with XREG
+```{r}
+oil_price <- unique(train[,c("date","price")])
+train_oil_price <- oil_price$price[1:1659]
+test_oil_price <- oil_price$price[1660:1679]
+```
+
+```{r}
+comb_oil_xreg = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE, xreg = train_oil_price, newxreg = test_oil_price
+)
+```
+
+```{r}
+smape(comb_oil_xreg$bts, val.hts$bts)
+```
+
+```{r}
+x_var <- unique(train[,c(2,7,10:12)])
+train_x_var <- as.matrix(x_var[1:1659,2:5])
+test_x_var <- as.matrix(x_var[1660:1679,2:5])
+```
+
+```{r}
+comb_all_xreg = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE, xreg = train_x_var, newxreg = test_x_var
+)
+```
+
+```{r}
+smape(comb_all_xreg$bts, val.hts$bts)
+```
+
+# Forecast Plots - Arima +Xreg
+```{r}
+comb_all_xreg$bts[,1:5] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Forecasted Grocery Sales by City, Type & Item Family - Guayaquil Type A")+
+  ylim(800,10000)
+
+val.hts$bts[,1:5] %>%
+  autoplot(facet=TRUE, color='red')+
+  xlab("Year") + ylab("Total Sales") + ggtitle("Actual Grocery Sales by City, Type & Item Family - Guayaquil Type A")+
+  ylim(800,10000)
+
+```
+
+
+# Forecast Plots - Arima Xreg 
+```{r}
+comb_all_xreg$bts[,26:30] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Forecasted Grocery Sales by City, Type & Item Family - Quinto Type A")+
+  ylim(8000,90000)
+
+val.hts$bts[,26:30] %>%
+  autoplot(facet=TRUE, color='red')+
+  xlab("Year") + ylab("Total Sales") + ggtitle("Actual Grocery Sales by City, Type & Item Family - Quinto Type A")+
+  ylim(8000,90000)
+
+```
+
+
+```{r}
+# total n_promotions in unique day
+total_n_promotion = train %>% dplyr::group_by(date) %>% dplyr::summarise(total_n_promotion =sum(n_promotion))
+## total number of perishable 
+total_perishable = train %>% dplyr::group_by(date) %>% dplyr::summarise(total_perishable = sum(perishable))
+
+x_var$total_n_promotion <- total_n_promotion$total_n_promotion
+x_var$total_perishable <- total_perishable$total_perishable
+
+
+train_x_var_all <- as.matrix(x_var[1:1659,2:7])
+test_x_var_all <- as.matrix(x_var[1660:1679,2:7])
+```
+
+```{r}
+comb_all_xreg_n = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE, xreg = train_x_var_all, newxreg = test_x_var_all
+)
+```
+
+```{r}
+smape(comb_all_xreg_n$bts, val.hts$bts)
+```
+
+
+```{r}
+comb_all_xreg_n$bts[,1:5] %>%
+  autoplot(facet=TRUE) +
+  xlab("Year") + ylab("Total Sales") + ggtitle("Forecasted Grocery Sales by City, Type & Item Family - Guayaquil Type A")+
+  ylim(800,10000)
+
+val.hts$bts[,1:5] %>%
+  autoplot(facet=TRUE, color='red')+
+  xlab("Year") + ylab("Total Sales") + ggtitle("Actual Grocery Sales by City, Type & Item Family - Guayaquil Type A")+
+  ylim(800,10000)
+
+```
