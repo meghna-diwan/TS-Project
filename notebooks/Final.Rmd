@@ -17,7 +17,9 @@ library(TSA)
 library(lubridate)
 library(tidyverse)
 library(TSPred)
-dataPath = "/Users/Leovainlove/Desktop"
+#dataPath = "/Users/Leovainlove/Desktop"
+dataPath = "/Volumes/SSD/TS-Project/data/subset"
+
 train1 <- read.csv(paste(dataPath,'train_city_type_item.csv',sep="/"))
 test1 <- read.csv(paste(dataPath,'test_city_type_item.csv',sep="/"))
 ```
@@ -46,13 +48,10 @@ train1 %>%
 
 
 ## Including Plots
-
-
 ```{r pressure, echo=FALSE}
 lm <- lm(tot_sales~., train)
 summary(lm)
 ```
-
 
 
 ```{r}
@@ -64,14 +63,11 @@ pacf(rs)
 Box.test(resid(lm), type = 'Ljung-Box', lag=10, fitdf = 2)
 ```
 
-
 ```{r}
 res_p = periodogram(rs)
 res_freq = res_p$freq[(res_p$spec > 5e+10)]
 1/res_freq
 ```
-
-
 
 ```{r}
 x_var <- within(train, rm("tot_sales",'national_flag','holiday_flag', 'n_promotion', 'perishable','pay.day_flag'))
@@ -84,13 +80,11 @@ am1 <- auto.arima(train$tot_sales, xreg=x_variables)
 am1_res <- am1$residuals
 ```
 
-
-
-
 ```{r}
 acf(am1$residuals)
 Box.test(am1_res, type = 'Ljung-Box', lag=10, fitdf = 2)
 ```
+
 ```{r}
 checkresiduals(am1)
 ```
@@ -105,15 +99,10 @@ cbind("Regression Errors" = residuals(am1, type="regression"),
   autoplot(facets=TRUE)
 ```
 
-
-
 ```{r}
 x_val <- within(test, rm("tot_sales",'n_promotion', 'perishable','national_flag','holiday_flag','pay.day_flag'))
 x_val <- data.matrix(x_val)
 ```
-
-
-
 
 ```{r}
 pred <- forecast(am1, h = 900, xreg=x_val)
@@ -126,6 +115,7 @@ smape(pred$mean, test$tot_sales)
 autoplot(pred) + ylab("Total_Sales")
 ```
 ## The result from above isn't good, so i decided to sum up all sales, n_promotion, perishable in a same day, then add the daily oil price to make a new data. 
+
 ## Then I run lm model on teh sales and use auto.arima with xreg to fix the error
 ```{r}
 #prepare total sales in a unique day
@@ -149,14 +139,12 @@ total_perishable = train1 %>% dplyr::group_by(date) %>% dplyr::summarise(total_p
 ## pay_day
 #pay_day = train1 %>% dplyr::group_by(date) %>% dplyr::summarise(pay_day =sum(pay.day_flag))
 
-
 sales$oil.price <- oil.price$price
 sales$n_promotion <- total_n_promotion$total_n_promotion
 sales$total_perishable <- total_perishable$total_perishable
 #sales$pay.day <- pay_day$pay_day
 
 head(sales)
-
 ```
 
 ```{r}
@@ -171,12 +159,11 @@ periodogram(total_sales.arima$residuals)
 ```{r}
 #sales_train = sales %>% dplyr::filter(date < as.Date("2017-07-27"))
 #sales_val = sales %>% dplyr::filter(date >= as.Date("2017-07-27"))
-
 sales_train = head(sales, -20)
 sales_val = tail(sales, 20)
 ```
 
-
+# Linear Regression
 ```{r}
 lm_data <- within(sales_train, rm('date'))
 lm1 <- lm(sales~., lm_data)
@@ -185,11 +172,13 @@ summary(lm1)
 
 ```{r}
 minday = as.Date("2013-01-02")
-sales_train.ts <- ts(sales_train$sales, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
+sales_train.ts <- ts(sales_train$sales, start = c(year(minday), 
+                                                  as.numeric(format(minday, "%j"))), freq = 365)
 sales_x_var <- data.matrix(within(sales_train, rm("sales", "date")))
 head(sales_x_var)
 ```
 
+# ARIMA with xreg
 ```{r}
 sales_am <- auto.arima(sales_train$sales, xreg=cbind(fourier(sales_train.ts, K=5), sales_x_var))
 sales_am_res <- sales_am$residuals
@@ -207,13 +196,15 @@ cbind("Regression Errors" = residuals(sales_am, type="regression"),
   autoplot(facets=TRUE)
 ```
 
+# Validation Set
 ```{r}
 x_sales_val <- data.matrix(within(sales_val, rm('date','sales')))
 minday = as.Date("2013-07-27")
-sales_test.ts <- ts(sales_val$sales, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
+sales_test.ts <- ts(sales_val$sales, start = c(year(minday), 
+                                               as.numeric(format(minday, "%j"))), freq = 365)
 ```
 
-
+# Forecast Total Sales 
 ```{r}
 pred2 <- forecast(sales_am, h = 20, xreg=cbind(fourier(sales_test.ts, K=5), x_sales_val))
 smape = function(y_pred, y_actual) {
@@ -226,6 +217,7 @@ smape(pred2$mean, sales_val$sales)
 autoplot(pred2) + ylab("Total_Sales")
 ```
 
+# Convert to Wide Form
 ```{r}
 train_wide = spread(train1, hts_label, tot_sales)
 train_wide[is.na(train_wide)] = 0
@@ -237,7 +229,7 @@ train_wide = train_wide %>%
 head(train_wide)
 ```
 
-
+# Calculate Proportions on Full Train
 ```{r}
 train.proportion <- train_wide[,-c(2,3)]
 Tot_Sales <- rowSums(train.proportion[,-1])
@@ -247,7 +239,6 @@ for (i in 2:47){
     train.proportion[j,i] <- train.proportion[j,i]/train.proportion[j,47]
   }
 }
-  
 ```
 
 
@@ -258,26 +249,19 @@ head(prop_train)
 head(prop_val)
 ```
 
+# Using Mean
 ```{r}
-#prop_train.mean<- colMeans(prop_train[,-1])
+prop_train.mean<- colMeans(prop_train[,2:46])
+prop_val.matrix = t(replicate(20, prop_train.mean))
 
+tot_pred = replicate(45, pred2$mean)
+val_pred = prop_val.matrix*tot_pred
+val_actual = as.matrix(tail(train_wide[, 4:48], 20))
 
-#prop_val.matrix = t(replicate(20, prop_train.mean))
-
-#pred_total <- pred2$mean
-
-
-#val_sale_break_down <- t(replicate(20, pred_total))
-
-#for (i in 1:45){
-  #for (j in 1:20){
-    #val_sale_break_down[j,i] <- pred_total
-  #}
-#}
+smape(val_pred, val_actual)
 ```
 
-
-
+# Using Auto.Arima
 ```{r}
 (minday = as.Date("2013-01-02"))
 am= list()
