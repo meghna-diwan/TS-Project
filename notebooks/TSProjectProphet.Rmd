@@ -178,17 +178,30 @@ train.proportion <- train_wide[,-c(2,3)]
 Tot_Sales <- rowSums(train.proportion[,-1])
 train.proportion <- cbind(train.proportion, Tot_Sales)
 for (i in 2:47){
-  for (j in 1:1679){
+  for (j in 1:1659){
     train.proportion[j,i] <- train.proportion[j,i]/train.proportion[j,47]
   }
 }
 
-# Assigning forecasted value based on proportions and total sales
+# Calculating average proportion
+train.proportion <- train.proportion[1:1659,]
+avg.proportion <- colSums(train.proportion[,-1]/1659)
+
+# Assigning forecasted value based on average and forecasted total sales
+# We will only be using the last 20 rows of train.proportion later
 for (i in 2:47){
   for (j in 1:1679){
-    train.proportion[j,i] <- result_pro$yhat[j]*train.proportion[j,i]
+    train.proportion[j,i] <- result_pro$yhat[j]*avg.proportion[i-1]
   }
 }
 
-# smape for each column will be the same as the total
+smape.values <- data.frame()
+
+# Calculating smape for each column
+for (i in 4:48){
+  smape.values <- rbind(smape.values, smape(as.numeric(unlist((train_wide[,i] %>% tail(20)))),train.proportion[,(i-2)] %>% tail(20)))
+}
+
+# Taking the average
+smape.final <- colSums(smape.values)/45; smape.final
 ```
