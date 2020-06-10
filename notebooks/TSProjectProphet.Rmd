@@ -205,3 +205,34 @@ for (i in 4:48){
 # Taking the average
 smape.final <- colSums(smape.values)/45; smape.final
 ```
+
+```{r}
+hts.CV = function(y, window, h) {
+  cv.error = matrix(ncol = 1)
+  
+  for (i in seq(1, nrow(y) - (window + h) + 1)) {
+    train_start = i
+    train_end = i + window - 1
+    test_start = i + window
+    test_end = i + window + h - 1
+    #print("/n")
+    #cat(train_start, train_end, test_start, test_end, sep = " ")
+    train_y = subset(y, start = train_start, end = train_end)
+    #print(nrow(train_y))
+    test_y = subset(y, start = test_start, end = test_end)
+    #print(nrow(test_y))
+    
+    train.pro <- prophet(train.real)
+    future <- make_future_dataframe(train.pro, periods = h)
+    fc = predict(train.pro,future)
+    print(paste("Done", as.character(i)))
+    acc = smape(fc$bts, test_hts$bts)
+    cv.error = rbind(cv.error, acc)
+  }
+  
+  return(cv.error)
+}
+
+cv.acc = hts.CV(y = train.ts, window = 1640, h = 30)
+```
+
