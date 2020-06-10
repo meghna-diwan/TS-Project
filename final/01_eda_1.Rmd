@@ -1,9 +1,13 @@
 ---
 title: "Exploratory Data Analysis"
-author: "Meghna Diwan"
+author: "Aarti Rao, Grace Chai, Jenny Huang, Meghna Diwan"
 date: "5/21/2020"
 output: html_document
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, echo=TRUE, warning=FALSE, message=FALSE, fig.keep = 'all')
+```
 
 ```{r message=FALSE, warning=FALSE}
 library(data.table)

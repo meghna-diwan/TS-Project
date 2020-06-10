@@ -1,16 +1,18 @@
 ---
 title: "Preprocess Holidays"
-author: "Aarti M Rao"
+author: "Aarti Rao, Grace Chai, Jenny Huang, Meghna Diwan"
 date: "5/24/2020"
 output: html_document
 ---
+
 ```{r setup, include=FALSE}
 library(dplyr)
 ```
 
 # Import data
 ```{r}
-holidays <- read.csv('holidays_events.csv')
+datapath = "/Volumes/SSD/TS-Project/data"
+holidays = read.csv(file = paste(datapath, 'full/holidays_events.csv', sep = "/"))
 #convert the date column to date format
 holidays$date <- as.Date(holidays$date)
 ```
@@ -80,6 +82,6 @@ summary(holidays_all)
 ```
 
 # Saving the dataset
-```{r}
+```{r eval=FALSE}
 write.csv(holidays_all,'holidays_new.csv')
 ```

@@ -1,6 +1,6 @@
 ---
 title: "Preprocess Oil Prices"
-author: "Aarti M Rao"
+author: "Aarti Rao, Grace Chai, Jenny Huang, Meghna Diwan"
 date: "5/24/2020"
 output: html_document
 ---
@@ -12,7 +12,8 @@ library(zoo)
 
 # Import data
 ```{r}
-oil <- read.csv('oil.csv')
+datapath = "/Volumes/SSD/TS-Project/data"
+oil = read.csv(file = paste(datapath, 'full/oil.csv', sep = "/"))
 #convert the date column to date format
 oil$date <- as.Date(oil$date)
 ```
@@ -43,7 +44,7 @@ oil_new[1,2] <- oil_new[2,2]
 ```
 
 # Saving the dataset
-```{r}
+```{r eval=FALSE}
 write.csv(oil_new,'oil_new.csv')
 ```
 
