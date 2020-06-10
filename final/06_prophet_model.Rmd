@@ -86,6 +86,8 @@ geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
   )
 
 ggplotly(plot1 , dynamicTicks = TRUE)
+
+smape(train.valid$y,result_pro$yhat %>% tail(20))
 ```
 
 ```{r}
@@ -115,6 +117,7 @@ geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
 
 ggplotly(plot2 , dynamicTicks = TRUE)
 
+smape(train.valid$y,result.pro.new$yhat %>% tail(20))
 # The model did worse, so I'm going to remove holiday data from the model
 ```
 
@@ -129,7 +132,7 @@ result.pro.new2 <- predict(train.pro.new2,future)
 # black is actual; green is old; red is new
 plot2 <- ggplot()+
 geom_line(data = result.pro.new2 %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "red")+
-geom_line(data = result.pro.new %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "green")+
+geom_line(data = result_pro %>% tail(20),aes(x = as.Date(ds) , y = yhat),col = "green")+
 geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
   scale_x_date(labels = scales::date_format("%b %d"),
     breaks = scales::date_breaks("1 day"))+
@@ -140,6 +143,8 @@ geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
   )
 
 ggplotly(plot2 , dynamicTicks = TRUE)
+
+smape(train.valid$y,result.pro.new2$yhat %>% tail(20))
 ```
 
 
@@ -179,6 +184,8 @@ geom_line(data = train.valid, aes(x = date, y = y) ,col = "black")+
   )
 
 ggplotly(plot3 , dynamicTicks = TRUE)
+
+smape(train.valid$y,result.pro.opt$yhat %>% tail(20))
 ```
 
 # Smape of validation data
