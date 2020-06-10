@@ -1,0 +1,200 @@
+---
+title: "Hierarchical Time Series Models"
+author: "Meghna Diwan & Aarti M. Rao"
+date: "5/29/2020"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(data.table)
+library(tidyverse)
+library(lubridate)
+library(xts)
+library(leaflet)
+library(ggfortify)
+library(tidyquant)
+library(forecast)
+library(tseries)
+library(TSA)
+library(hts)
+library(fpp2)
+library(tsbox)
+rm(list = ls())
+gc()
+```
+
+# Import Data
+```{r}
+datapath = "/Volumes/SSD/TS-Project/data"
+train = fread(file=paste(datapath,"subset/train_city_type_item.csv",sep="/"))
+```
+
+# Transform to Wide form
+```{r}
+# Long to Wide
+train_wide = spread(train, hts_label, tot_sales)
+train_wide[is.na(train_wide)] = 0
+train_wide = train_wide %>%
+                  select(-city, -type, -family, -price, -n_promotion, -perishable, -national_flag,
+                         -holiday_flag, -pay.day_flag) %>%
+                  group_by(date) %>%
+                  summarise_all(funs(sum))
+# Covert to TS object
+train.ts = ts(train_wide[2:ncol(train_wide)], frequency=365.25, 
+     start = c(year("2013-01-01"), 1))
+```
+
+# Run HTS
+```{r}
+train.hts = hts(train.ts, characters = c(2, 1, 5))
+summary(train.hts)
+smatrix(train.hts)
+```
+
+# Train - Val Split
+```{r}
+data.hts = window(train.hts, start = 2013, end = 2017.541) # 1659 dates
+summary(data.hts)
+val.hts = window(train.hts, start = 2017.542) # 20 dates
+summary(val.hts)
+```
+
+# SMAPE Function
+```{r}
+smape = function(y_pred, y_actual) {
+  error = mean(abs(y_pred - y_actual)/(abs(y_actual) + abs(y_pred)))
+  return(error)
+}
+```
+
+# Base Model
+```{r}
+rw.top.down = forecast(
+  data.hts, h = 20, method = "tdfp", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+rw.bottom.up = forecast(
+  data.hts, h = 20, method = "bu", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+rw.middle.out = forecast(
+  data.hts, h = 20, method = "mo", fmethod = "rw", level = 2,
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+rw.comb = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "rw",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+base_results = rbind(smape(rw.top.down$bts, val.hts$bts),
+                smape(rw.bottom.up$bts, val.hts$bts),
+                smape(rw.middle.out$bts, val.hts$bts),
+                smape(rw.comb$bts, val.hts$bts))
+rownames(base_results) = c("top.down",  "bottom.up",  "middle.out", "combination")
+base_results
+```
+    
+Irrespective of method, hierarchical time series with random walk gives the same SMAPE.
+
+# Forecast using different methods
+```{r}
+top.down = forecast(
+  data.hts, h = 20, method = "tdfp", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+bottom.up = forecast(
+  data.hts, h = 20, method = "bu", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+middle.out = forecast(
+  data.hts, h = 20, method = "mo", fmethod = "arima", level = 2,
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+comb = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+comb_wls = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+ 
+comb_wls_alg = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls", algorithms = "lu",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+comb_nseries = forecast(
+  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "nseries",
+  keep.fitted = TRUE, keep.resid = TRUE
+)
+
+```
+
+# Compare SMAPE Errors
+```{r}
+results = rbind(smape(top.down$bts, val.hts$bts),
+                smape(bottom.up$bts, val.hts$bts),
+                smape(middle.out$bts, val.hts$bts),
+                smape(comb$bts, val.hts$bts),
+                smape(comb_wls$bts, val.hts$bts),
+                smape(comb_wls_alg$bts, val.hts$bts), 
+                smape(comb_nseries$bts, val.hts$bts))
+rownames(results) = c("top.down",  "bottom.up",  "middle.out", 
+                      "combination", "comb_wls", "comb_wls_alg", "comb_nseries")
+results
+```
+
+# Cross-Validation Function
+```{r}
+hts.CV = function(y, window, h) {
+  cv.error = matrix(ncol = 1)
+  
+  for (i in seq(1, nrow(y) - (window + h) + 1)) {
+    train_start = i
+    train_end = i + window - 1
+    test_start = i + window
+    test_end = i + window + h - 1
+    
+    train_y = subset(y, start = train_start, end = train_end)
+    test_y = subset(y, start = test_start, end = test_end)
+
+    train_hts = hts(train_y, characters = c(2, 1, 5))
+    test_hts = hts(test_y, characters = c(2, 1, 5))
+    
+    fc = forecast(train_hts, h = h, method = "comb", fmethod = "arima",
+                  keep.fitted = TRUE, keep.resid = TRUE)
+    print(paste("Done", as.character(i)))
+    acc = smape(fc$bts, test_hts$bts)
+    cv.error = rbind(cv.error, acc)
+  }
+  
+  return(cv.error)
+}
+```
+
+# CV Using 10 Folds
+```{r}
+start.time = Sys.time()
+cv.acc = hts.CV(y = train.ts, window = 1640, h = 30) # takes 11 mins to run one fold
+end.time = Sys.time()
+(time.taken = end.time - start.time)
+```
+    
+Due to limited computational power, only 10-fold CV was implemented.
+
+CV Errors
+```{r}
+# Mean SMAPE
+mean(cv.acc, na.rm = T)
+
+# Standard Deviation of SMAPE
+sd(cv.acc, na.rm = T)
+```

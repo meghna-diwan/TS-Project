@@ -106,6 +106,60 @@ oil$date = as.Date(oil$date)
 as.Date(setdiff(dates_all, oil$date))
 ```
 
+# Visualize Dates
+```{r}
+train_dt <- dtrain %>%
+  distinct(date) %>%
+  mutate(dset = "train") %>%
+  mutate(year = year(date))
+
+train_dt$date = ymd(as.Date(train_dt$date, "%Y-%m-%d"))
+year(train_dt$date) = 2017
+
+train_dt %>%
+  filter(!is.na(date)) %>%
+  ggplot(aes(date, year)) +
+  geom_point(shape = "|", size = 10, colour = "#2a3990") +
+  scale_x_date(date_labels = "%B", date_breaks = "1 month") +
+  scale_y_reverse() +
+  theme(axis.text.x  = element_text(angle=45, hjust=1, vjust=0.9))
+```
+
+
+# Perishable
+```{r}
+items %>%
+  ggplot(aes(family, fill = perishable)) +
+  geom_bar(position = "fill") +
+  scale_fill_continuous(type = "viridis") +
+  coord_flip() 
+
+
+items %>% 
+  ggplot(aes(family, perishable)) +  
+  geom_bar(stat = "identity", na.rm = T, colour = "#2a3990") + 
+  coord_flip()
+```
+
+
+# Promotions
+```{r}
+item_promo = dtrain %>% 
+                select(item_nbr, promotion) %>% 
+                group_by(item_nbr) %>% 
+                summarize(n_promo = sum(promotion, na.rm = T))
+
+items = left_join(items, item_promo)
+items$n_promo[is.na(items$n_promo)] <- 0
+
+
+items %>% 
+  ggplot(aes(family, n_promo)) +  
+  geom_bar(stat = "identity", na.rm = T, colour = "#2a3990") + 
+  coord_flip() 
+```
+
+
 # Collapse Data
 ```{r}
 # Shopping behavior patterns of Ecudor

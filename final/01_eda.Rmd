@@ -1,0 +1,119 @@
+---
+title: "Exploratory Data Analysis"
+author: "Meghna Diwan"
+date: "5/21/2020"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(data.table)
+library(tidyverse)
+library(lubridate)
+library(xts)
+library(leaflet)
+library(ggfortify)
+library(tidyquant)
+
+library(forecast)
+library(tseries)
+library(TSA)
+rm(list = ls())
+gc()
+```
+
+# Import Data
+```{r message=FALSE}
+datapath = "/Volumes/SSD/TS-Project/data"
+train <- fread(file=paste(datapath,"full/train.csv",sep="/"))
+stores <- fread(file=paste(datapath,"full/stores.csv",sep="/"))
+oil <- fread(file=paste(datapath,"full/oil.csv",sep="/"))
+items <- fread(file=paste(datapath,"full/items.csv",sep="/"))
+transactions <- fread(file = paste(datapath, 'full/transactions.csv', sep = "/"))
+holiday = fread(file = paste(datapath, 'full/holidays_events.csv', sep = "/"))
+```
+
+# Check Missing Data
+```{r}
+data.frame(train = colSums(is.na(train)))
+data.frame(stores = colSums(is.na(stores)))
+data.frame(oil = colSums(is.na(oil)))
+data.frame(items = colSums(is.na(items)))
+data.frame(transactions = colSums(is.na(transactions)))
+data.frame(holiday = colSums(is.na(holiday)))
+```
+
+# Check if all dates are available between 2013 and 2017
+```{r}
+dates_all = seq(as.Date("2013-01-01"), as.Date("2017-08-15"), by="days")
+dates = as.Date(unique(train$date))
+as.Date(setdiff(dates_all, dates)) 
+# dates missing are Christmas day in all 4 years - stores closed on that date
+
+# Oil Dates - not continuous
+head(oil$date)
+tail(oil$date)
+# oil$date = as.Date(oil$date)
+# as.Date(setdiff(dates_all, oil$date))
+```
+
+# Visualize Dates
+```{r}
+train_dt <- train %>%
+  distinct(date) %>%
+  mutate(dset = "train") %>%
+  mutate(year = year(date))
+
+train_dt$date = ymd(as.Date(train_dt$date, "%Y-%m-%d"))
+year(train_dt$date) = 2017
+
+train_dt %>%
+  filter(!is.na(date)) %>%
+  ggplot(aes(date, year)) +
+  geom_point(shape = "|", size = 10, colour = "#2a3990") +
+  scale_x_date(date_labels = "%B", date_breaks = "1 month") +
+  scale_y_reverse() +
+  theme(axis.text.x  = element_text(angle=45, hjust=1, vjust=0.9))
+```
+
+# Perishable Items
+```{r}
+items %>% 
+  ggplot(aes(family, perishable)) +  
+  geom_bar(stat = "identity", na.rm = T, colour = "#2a3990") + 
+  coord_flip()
+```
+
+# Items on Promotion
+```{r}
+train$promotion = ifelse(train$onpromotion == TRUE, 1, 0)
+train$promotion[is.na(train$promotion)] = 0
+
+item_promo = train %>% 
+                select(item_nbr, promotion) %>% 
+                group_by(item_nbr) %>% 
+                summarize(n_promo = sum(promotion, na.rm = T))
+
+items = left_join(items, item_promo, by = "item_nbr")
+items$n_promo[is.na(items$n_promo)] <- 0
+
+items %>% 
+  ggplot(aes(family, n_promo)) +  
+  geom_bar(stat = "identity", na.rm = T, colour = "#2a3990") + 
+  coord_flip() 
+```
+
+# Plot Total Sales
+```{r}
+tot_sales = train %>%
+            select(date, unit_sales) %>%
+            group_by(date) %>%
+            summarise(sales = sum(unit_sales))
+sales.xts = as.xts(tot_sales$sales,order.by=as.Date(tot_sales$date, "%Y-%m-%d"))
+dev.new(width=30, height=9, unit="in")
+plot(sales.xts, main = "Total Sales", col = "blue", yaxis.right = F)
+```
+
+
+
+
+

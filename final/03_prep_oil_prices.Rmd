@@ -1,0 +1,60 @@
+---
+title: "Preprocess Oil Prices"
+author: "Aarti M Rao"
+date: "5/24/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(zoo)
+```
+
+# Import data
+```{r}
+oil <- read.csv('oil.csv')
+#convert the date column to date format
+oil$date <- as.Date(oil$date)
+```
+
+# Creating continuous sequence of dates
+```{r}
+dates <- data.frame(seq(as.Date("2013/1/1"), as.Date("2017/8/31"), "day"))
+names(dates) <- "date"
+```
+
+# Join oil prices to dates sequence to identify the dates with missing prices
+```{r}
+oil_all <- left_join(dates, oil)
+```
+
+# Fill NAs with prices from previous fields
+## Logic - it appears that weekends and holidays have oil prices missing. Filling them with the closest available price as they wouldn't change over the weekend
+```{r}
+# using the na.locf(last observation forward) function from the zoo package
+oil_all$price <- na.locf(oil_all$dcoilwtico, na.rm=FALSE)
+```
+
+# Carrying forward only the required columns
+```{r}
+oil_new <- oil_all[c("date", "price")]
+#filling the missing value for 01-Jan-2013 with value from 02-Jan-2013
+oil_new[1,2] <- oil_new[2,2]
+```
+
+# Saving the dataset
+```{r}
+write.csv(oil_new,'oil_new.csv')
+```
+
+# Math to verify number of dates with missing prices
+## More or less equal to (no. of weeks * 2) (number of weekend days) in ~4.6 years data
+
+```{r}
+#1704-1218
+
+#(4*365)+243
+#(365/12)*8
+#(((244/365)+4)*52)*2
+```
+

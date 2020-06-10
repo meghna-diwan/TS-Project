@@ -1,0 +1,206 @@
+---
+title: "Create Train Dataset"
+author: "Meghna Diwan"
+date: "5/21/2020"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(data.table)
+library(tidyverse)
+library(lubridate)
+library(xts)
+library(leaflet)
+library(ggfortify)
+library(tidyquant)
+
+library(forecast)
+library(tseries)
+library(TSA)
+rm(list = ls())
+gc()
+```
+
+# Import Data
+```{r eval=FALSE}
+datapath = "/Volumes/SSD/TS-Project/data"
+
+dtrain = fread(file=paste(datapath,"full/train.csv",sep="/"))
+stores = fread(file=paste(datapath,"full/stores.csv",sep="/"))
+oil = fread(file=paste(datapath,"full/oil_new.csv",sep="/"))
+items = fread(file=paste(datapath,"full/items.csv",sep="/"))
+transactions = fread(file = paste(datapath, 'full/transactions.csv', sep = "/"))
+holiday = fread(file = paste(datapath, 'full/holidays_new.csv', sep = "/"))
+```
+
+# Make promotions binary
+```{r eval=FALSE}
+dtrain$promotion = ifelse(dtrain$onpromotion == TRUE, 1, 0)
+dtrain$promotion[is.na(dtrain$promotion)] = 0
+```
+
+# Create Date-Store-Family Level
+```{r eval=FALSE}
+## Read maps
+library(readxl)
+item_map = read_excel(path = paste(datapath,"full/store_item_map.xlsx",sep="/"), 
+                      sheet = "item_map")
+store_map = read_excel(path = paste(datapath,"full/store_item_map.xlsx",sep="/"), 
+                       sheet = "store_map")
+cluster_map = read_excel(path = paste(datapath,"full/store_item_map.xlsx",sep="/"), 
+                         sheet = "cluster_map")
+## Add maps
+items = left_join(items, item_map, by= 'family')
+stores = left_join(stores, store_map, by = 'store_nbr')
+stores = left_join(stores, cluster_map, by = 'cluster')
+
+## Collapse to store, family level
+train_item <- left_join(dtrain, items, by="item_nbr")
+train_fam = train_item %>%
+              select(date, store_nbr, item_nbr, family, family_nbr, 
+                     unit_sales, promotion, perishable) %>%
+              group_by(date, store_nbr, family, family_nbr) %>%
+              summarize(tot_sales = sum(unit_sales),
+                        n_promotion = sum(promotion),
+                        n_perishable = sum(perishable))
+train_fam = left_join(train_fam, stores, by = "store_nbr")
+
+## Save output
+write.csv(train_fam, paste(datapath, "subset/train_store_fam.csv", sep = "/"))
+rm(list = ls())
+gc()
+```
+
+# Create City, Type, Top 5 Items Level
+```{r}
+# import
+datapath = "/Volumes/SSD/TS-Project/data"
+train = fread(file=paste(datapath,"subset/train_store_fam.csv",sep="/"))
+oil = fread(file=paste(datapath,"full/oil_new.csv",sep="/"))
+holiday = fread(file = paste(datapath, 'full/holidays_new.csv', sep = "/"))
+
+## Find Top 5 items per category
+train_top_items = train %>%
+            filter(city %in% c("Quito", "Guayaquil")) %>%
+            group_by(city, type, family) %>%
+            summarize(tot_sales = sum(tot_sales)) %>%
+            arrange(city, type, desc(tot_sales)) %>%
+            top_n(5, tot_sales)
+
+## Keep on those combinations identified
+train_subset = inner_join(train_top_items, train, by= c("city", "type", "family"))
+
+# Collapse to Date, City, Type and Item Level
+train_subset_summ = train_subset %>%
+                select(date, city, type, family, family_nbr, tot_sales.y, 
+                       n_promotion, n_perishable) %>%
+                group_by(date, city, type, family, family_nbr) %>%
+                summarise(tot_sales = sum(tot_sales.y),
+                          n_promotion = sum(n_promotion),
+                          perishable = sum(n_perishable))
+
+# Create label for HTS
+train_subset_summ$city_label = substr(train_subset_summ$city, 1, 2)
+train_subset_summ$hts_label = paste0(train_subset_summ$city_label,train_subset_summ$type,
+                                 train_subset_summ$family_nbr)
+
+# Add Oil and Holidays
+train_subset_summ = left_join(train_subset_summ, oil, by="date")
+train_subset_summ = left_join(train_subset_summ, holiday, by="date")
+
+# Add Flag if Date is pay day (15 or end of the month)
+train_subset_summ$date = as.Date(train_subset_summ$date, "%Y-%m-%d")
+train_subset_summ$day = day(train_subset_summ$date)
+train_subset_summ$pay.day_flag = ifelse(train_subset_summ$day %in% c(15, 28, 29, 30, 31), 1, 0)
+
+# Save
+train_subset_summ = train_subset_summ %>% 
+  select(date, city, type, family, hts_label, price, n_promotion, perishable, 
+         national_flag, holiday_flag, pay.day_flag, tot_sales)
+
+write.csv(train_subset_summ, paste(datapath, "subset/train_city_type_item.csv", sep = "/"))
+```
+
+# Plot Total Sales
+```{r}
+train_subset_summ %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarise(sales = sum(tot_sales)) %>%
+  ggplot(aes(date, sales)) +
+  geom_line(color = "blue")
+```
+
+# Plot Seasonality
+```{r}
+train_subset_summ %>%
+  ungroup() %>%
+  mutate(wday = wday(date, label = TRUE),
+         month = month(date, label = TRUE)) %>%
+  mutate(wday = fct_relevel(wday, c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))) %>%
+  group_by(wday, month) %>%
+  summarise(mean_sales = mean(tot_sales)) %>%
+  ggplot(aes(month, wday, fill = mean_sales)) +
+  geom_tile() +
+  labs(x = "Month of the year", y = "Day of the week") +
+  scale_fill_distiller(palette = "Spectral")
+```
+
+# Plot by Type
+```{r}
+train_subset_summ %>%
+  ungroup() %>%
+  mutate(date =  as.Date(date, "%Y-%m-%d")) %>%
+  group_by(date, type) %>%
+  summarise(sales = sum(tot_sales)) %>%
+  filter(sales > 600) %>%
+  ggplot(aes(date, sales, color = type)) +
+  geom_line()
+```
+
+# Plot Oil price
+```{r}
+train_subset_summ %>%
+  ungroup() %>%
+  mutate(date =  as.Date(date, "%Y-%m-%d")) %>%
+  group_by(date) %>%
+  summarise(sales = sum(tot_sales), price = mean(price)) %>%
+  mutate(oilprice = ( min(sales, na.rm = TRUE) + (price-min(price, na.rm=TRUE)) / (max(price, na.rm = TRUE) - min(price, na.rm = TRUE)) * (max(sales, na.rm = TRUE) - min(sales, na.rm = TRUE)) )) %>%
+  ggplot(aes(date, sales)) +
+  geom_line() +
+  geom_line(aes(date, oilprice), color = "blue") +
+  ggtitle("Total sales (black) with oilprice (blue)")
+```
+
+# Visualization of the train-test split
+```{r}
+train_dt = train_subset_summ %>% 
+                ungroup() %>%
+                distinct(date) %>%
+                head(-20) %>%
+                mutate(dset = "Train")
+
+val_dt = train_subset_summ %>% 
+                ungroup() %>%
+                distinct(date) %>%
+                tail(20) %>%
+                mutate(dset = "Validation")
+
+train_dt = train_dt %>%
+                bind_rows(val_dt) %>%
+                mutate(year = year(date))
+
+train_dt$date = ymd(as.Date(train_dt$date, "%Y-%m-%d"))
+year(train_dt$date) = 2017
+
+train_dt %>%
+  filter(!is.na(date)) %>%
+  ggplot(aes(date, year, color = dset)) +
+  geom_point(shape = "|", size = 10) +
+  scale_x_date(date_labels = "%B", date_breaks = "1 month") +
+  scale_y_reverse() +
+  theme(legend.position = "bottom", axis.text.x  = element_text(angle=45, hjust=1, vjust=0.9)) +
+  labs(color = "Data set") +
+  guides(color = guide_legend(override.aes = list(size = 4, pch = 15)))
+```
+

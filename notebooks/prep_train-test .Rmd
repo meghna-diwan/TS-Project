@@ -137,11 +137,11 @@ train_subset = inner_join(train_top_items, train, by= c("city", "type", "family"
 
 # Collapse to Date, City, Type and Item Level
 train_subset_summ = train_subset %>%
-                select(date, city, type, family, family_nbr, tot_sales.y, n_promotion, perishable) %>%
+                select(date, city, type, family, family_nbr, tot_sales.y, n_promotion, n_perishable) %>%
                 group_by(date, city, type, family, family_nbr) %>%
                 summarise(tot_sales = sum(tot_sales.y),
                           n_promotion = sum(n_promotion),
-                          perishable = max(perishable))
+                          perishable = sum(n_perishable))
 
 # Create label for HTS
 train_subset_summ$city_label = substr(train_subset_summ$city, 1, 2)
@@ -288,4 +288,3 @@ test_subset_summ = test_subset_summ %>% ungroup() %>%
 
 write.csv(test_subset_summ, paste(datapath, "subset/test_city_store_item.csv", sep = "/"))
 ```
-

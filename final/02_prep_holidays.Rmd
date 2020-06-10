@@ -1,0 +1,85 @@
+---
+title: "Preprocess Holidays"
+author: "Aarti M Rao"
+date: "5/24/2020"
+output: html_document
+---
+```{r setup, include=FALSE}
+library(dplyr)
+```
+
+# Import data
+```{r}
+holidays <- read.csv('holidays_events.csv')
+#convert the date column to date format
+holidays$date <- as.Date(holidays$date)
+```
+
+# Remove dates with type="Work Day"
+```{r}
+holidays_nowd <- holidays %>%
+  filter(type != "Work Day")
+```
+
+# Remove dates with transferred = "True"
+```{r}
+holidays_notransfer <- holidays_nowd %>%
+  filter(transferred == "False")
+```
+
+# Remove unnecessary columns (description, transferred, locale name)
+```{r}
+# using unique function to remove duplicate records
+holidays_nodup <- unique(holidays_notransfer[ ,c(1,3)])
+```
+
+# Transform locale column to be a binary flag to indicate whether the holiday was National or not
+```{r}
+# replacing "Local" with "Regional"
+holidays_loc <- holidays_nodup %>%
+  mutate(locale=replace(locale, locale=="Local", "Regional")) %>%
+  as.data.frame()
+
+# replacing values with 1s(National) and 0s (Regional)
+holidays_loc$locale=ifelse(holidays_loc$locale=="National",1,0)
+
+#  Grouping by the date to remove duplicates - if a date captured a holiday once as a regional and once as a National Holiday, its aggregated as a National Holiday
+holidays_unique = holidays_loc %>%
+  group_by(date) %>%
+  summarize(national_flag = max(locale))
+
+summary(holidays_unique)
+```
+
+# Trimming the holiday dates range to within train data date range (as dates start from 02 Mar 2012 and go up tp 26 dec 2017)
+```{r}
+holidays_unique <- subset(holidays_unique, date>= "2013-01-01" & date < "2017-09-01")
+summary(holidays_unique)
+```
+
+# Creating continuous sequence of dates
+```{r}
+dates <- data.frame(seq(as.Date("2013/1/1"), as.Date("2017/8/31"), "day"))
+names(dates) <- "date"
+```
+
+# Join holidays_unique to dates sequence
+```{r}
+holidays_all <- left_join(dates, holidays_unique)
+```
+
+# Creating a holiday flag
+```{r}
+holidays_all$holiday_flag=ifelse(is.na(holidays_all$national_flag),0,1)
+```
+
+# Replacing NAs in Nationa flag with 0s
+```{r}
+holidays_all$national_flag[is.na(holidays_all$national_flag)] <- 0
+summary(holidays_all)
+```
+
+# Saving the dataset
+```{r}
+write.csv(holidays_all,'holidays_new.csv')
+```
