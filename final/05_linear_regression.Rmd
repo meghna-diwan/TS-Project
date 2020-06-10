@@ -1,0 +1,345 @@
+---
+title: "Linear Regression Model"
+author: "Aarti Rao, Grace Chai, Jenny Huang, Meghna Diwan"
+date: "5/31/2020"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+library(forecast)
+library(tseries)
+library(lmtest)
+library(arfima)
+library(fracdiff)
+library(DBI)
+library(mltools)
+library(TSA)
+library(lubridate)
+library(tidyverse)
+library(TSPred)
+
+rm(list= ls())
+gc()
+```
+
+# Import Data
+```{r, include=TRUE}
+dataPath = "/Volumes/SSD/TS-Project/data/subset"
+train1 <- read.csv(paste(dataPath,'train_city_type_item.csv',sep="/"))
+```
+
+```{r}
+train1$date = as.Date(train1$date)
+dates = unique(train1$date)
+train_set = train1 %>%
+                dplyr::filter(date < as.Date("2017-07-27"))
+val_set = train1 %>%
+              dplyr::filter(date >= as.Date("2017-07-27"))
+
+train <- within(train_set, rm('date','X','hts_label'))
+test <- within(val_set, rm('date','X','hts_label'))
+```
+
+## R Markdown
+```{r}
+train1 %>%
+  mutate(date =  as.Date(date, "%Y-%m-%d")) %>%
+  group_by(date, type) %>%
+  ggplot(aes(date, tot_sales, color = type)) +
+  geom_line()
+```
+
+
+## Including Plots
+```{r pressure, echo=FALSE}
+lm <- lm(tot_sales~., train)
+summary(lm)
+```
+
+```{r}
+rs <- window(lm$residuals)
+ts.plot(rs)
+acf(rs)
+pacf(rs)
+#dwtest(lm, alternative="two.sided")
+Box.test(resid(lm), type = 'Ljung-Box', lag=10, fitdf = 2)
+```
+
+```{r}
+res_p = periodogram(rs)
+res_freq = res_p$freq[(res_p$spec > 5e+10)]
+1/res_freq
+```
+
+```{r}
+x_var <- within(train, rm("tot_sales",'national_flag','holiday_flag', 'n_promotion', 'perishable','pay.day_flag'))
+x_variables <- data.matrix(x_var)
+head(x_variables)
+```
+
+```{r}
+am1 <- auto.arima(train$tot_sales, xreg=x_variables)
+am1_res <- am1$residuals
+```
+
+```{r}
+acf(am1$residuals)
+Box.test(am1_res, type = 'Ljung-Box', lag=10, fitdf = 2)
+```
+
+```{r}
+checkresiduals(am1)
+```
+
+```{r}
+periodogram(am1_res)
+```
+
+```{r}
+cbind("Regression Errors" = residuals(am1, type="regression"),
+      "ARIMA errors" = residuals(am1, type="innovation")) %>%
+  autoplot(facets=TRUE)
+```
+
+```{r}
+x_val <- within(test, rm("tot_sales",'n_promotion', 'perishable','national_flag','holiday_flag','pay.day_flag'))
+x_val <- data.matrix(x_val)
+```
+
+```{r}
+pred <- forecast(am1, h = 900, xreg=x_val)
+smape = function(y_pred, y_actual) {
+  error = mean(abs(y_pred - y_actual)/(abs(y_actual) + abs(y_pred)))
+  return(error)
+}
+smape(pred$mean, test$tot_sales)
+
+autoplot(pred) + ylab("Total_Sales")
+```
+## The result from above isn't good, so i decided to sum up all sales, n_promotion, perishable in a same day, then add the daily oil price to make a new data. 
+
+## Then I run lm model on teh sales and use auto.arima with xreg to fix the error
+```{r}
+#prepare total sales in a unique day
+sales = train1 %>% dplyr::group_by(date) %>% dplyr::summarise(sales = sum(tot_sales))
+minday = as.Date("2013-01-02")
+sales.ts = ts(sales$sales, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
+plot(sales.ts)
+p = periodogram(sales.ts)
+max_freq = p$freq[(p$spec > 1e+12)]
+1/max_freq
+
+# oil price
+oil.price = train1 %>% dplyr::group_by(date) %>% dplyr::summarise(price = mean(price))
+
+# total n_promotions in unique day
+total_n_promotion = train1 %>% dplyr::group_by(date) %>% dplyr::summarise(total_n_promotion =sum(n_promotion))
+
+## total number of perishable 
+total_perishable = train1 %>% dplyr::group_by(date) %>% dplyr::summarise(total_perishable = sum(perishable))
+
+## pay_day
+#pay_day = train1 %>% dplyr::group_by(date) %>% dplyr::summarise(pay_day =sum(pay.day_flag))
+
+sales$oil.price <- oil.price$price
+sales$n_promotion <- total_n_promotion$total_n_promotion
+sales$total_perishable <- total_perishable$total_perishable
+#sales$pay.day <- pay_day$pay_day
+
+head(sales)
+```
+
+```{r}
+total_sales.arima = auto.arima(sales.ts, xreg = cbind(fourier(sales.ts, K=5), oil.price$price), 
+                               seasonal = T)
+total_sales.arima
+acf(total_sales.arima$residuals)
+pacf(total_sales.arima$residuals)
+periodogram(total_sales.arima$residuals)
+```
+
+```{r}
+#sales_train = sales %>% dplyr::filter(date < as.Date("2017-07-27"))
+#sales_val = sales %>% dplyr::filter(date >= as.Date("2017-07-27"))
+sales_train = head(sales, -20)
+sales_val = tail(sales, 20)
+```
+
+# Linear Regression
+```{r}
+lm_data <- within(sales_train, rm('date'))
+lm1 <- lm(sales~., lm_data)
+summary(lm1)
+```
+
+```{r}
+minday = as.Date("2013-01-02")
+sales_train.ts <- ts(sales_train$sales, start = c(year(minday), 
+                                                  as.numeric(format(minday, "%j"))), freq = 365)
+sales_x_var <- data.matrix(within(sales_train, rm("sales", "date")))
+head(sales_x_var)
+```
+
+# ARIMA with xreg using oil price, promotion and perishable
+```{r}
+sales_am <- auto.arima(sales_train$sales, xreg=cbind(fourier(sales_train.ts, K=5), sales_x_var))
+sales_am_res <- sales_am$residuals
+acf(sales_am_res)
+pacf(sales_am_res)
+```
+
+```{r}
+Box.test(sales_am_res, type = 'Ljung-Box', lag=10, fitdf = 2)
+```
+
+```{r}
+cbind("Regression Errors" = residuals(sales_am, type="regression"),
+      "ARIMA errors" = residuals(sales_am, type="innovation")) %>%
+  autoplot(facets=TRUE)
+```
+
+# Validation Set
+```{r}
+x_sales_val <- data.matrix(within(sales_val, rm('date','sales')))
+minday = as.Date("2013-07-27")
+sales_test.ts <- ts(sales_val$sales, start = c(year(minday), 
+                                               as.numeric(format(minday, "%j"))), freq = 365)
+```
+
+# Forecast Total Sales 
+```{r}
+pred2 <- forecast(sales_am, h = 20, xreg=cbind(fourier(sales_train.ts, K=5, h=20), x_sales_val))
+smape = function(y_pred, y_actual) {
+  error = mean(abs(y_pred - y_actual)/(abs(y_actual) + abs(y_pred)))
+  return(error)
+}
+
+smape(pred2$mean, sales_val$sales)
+
+autoplot(pred2) + ylab("Total_Sales")
+```
+
+# Convert to Wide Form
+```{r}
+train_wide = spread(train1, hts_label, tot_sales)
+train_wide[is.na(train_wide)] = 0
+train_wide = train_wide %>%
+                  select(-city, -type, -family, -price, -n_promotion, 
+                         -perishable, -national_flag, -pay.day_flag) %>%
+                  group_by(date) %>%
+                  summarise_all(funs(sum))
+head(train_wide)
+```
+
+# Calculate Proportions on Full Train
+```{r}
+train.proportion <- train_wide[,-c(2,3)]
+Tot_Sales <- rowSums(train.proportion[,-1])
+train.proportion <- cbind(train.proportion, Tot_Sales)
+for (i in 2:47){
+  for (j in 1:1679){
+    train.proportion[j,i] <- train.proportion[j,i]/train.proportion[j,47]
+  }
+}
+```
+
+
+```{r}
+prop_train <- train.proportion[1:1659,]
+prop_val <- train.proportion[1660:1679,]
+head(prop_train)
+head(prop_val)
+```
+
+# Using Mean
+```{r}
+prop_train.mean<- colMeans(prop_train[,2:46])
+prop_val.matrix = t(replicate(20, prop_train.mean))
+
+tot_pred = replicate(45, pred2$mean)
+val_pred = prop_val.matrix*tot_pred
+val_actual = as.matrix(tail(train_wide[, 4:48], 20))
+
+smape(val_pred, val_actual)
+```
+
+# Using Auto.Arima
+```{r}
+(minday = as.Date("2013-01-02"))
+am= list()
+pred= list()
+pred_prop_matrix = matrix(nrow = 20, ncol = 45)
+ts =  ts(prop_train, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
+
+for (i in 1:45) {
+    am[[i]] = auto.arima(ts[, i+1], seasonal=TRUE)
+    pred[[i]] = forecast(am[[i]], h=20)
+    pred_prop_matrix[, i] =  pred[[1]]$mean
+}
+
+# smape for proportions
+smape(pred_prop_matrix, as.matrix(prop_val[, 2:46]))
+
+# smape for sales across the groups
+tot_pred = replicate(45, pred2$mean)
+val_pred = pred_prop_matrix*tot_pred
+val_actual = as.matrix(tail(train_wide[, 4:48], 20))
+
+smape(val_pred, val_actual)
+```
+
+
+# Cross-Validation Function using Arima & Xreg
+```{r}
+lr.CV = function(y, window, h) {
+  cv.error = matrix(ncol = 1)
+  
+  for (i in seq(1, nrow(y) - (window + h) + 1)) {
+    train_start = i
+    train_end = i + window - 1
+    test_start = i + window
+    test_end = i + window + h - 1
+   
+    # Train-Test Split Sales
+    train_sales = y[train_start:train_end, ]
+    test_sales = y[test_start:test_end, ]
+    
+    # Transform Train Sales for Fourier
+    minday = as.Date(train_sales$date[1])
+    sales_train.ts = ts(train_sales$sales, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
+    
+    # Transform Test Sales for Fourier
+    minday = as.Date(test_sales$date[1])
+    sales_test.ts = ts(test_sales$sales, start = c(year(minday), as.numeric(format(minday, "%j"))), freq = 365)
+    
+    # Split Xreg Vars
+    x_var_train = x_var[train_start:train_end, ]
+    x_var_test = x_var[test_start:test_end, ]
+    
+    # Forecast
+    sales_am <- auto.arima(train_sales$sales, xreg=cbind(fourier(sales_train.ts, K=5), x_var_train))
+    fc = forecast(sales_am, h = h, xreg=cbind(fourier(sales_train.ts, K=5, h=h), x_var_test))
+    print(paste("Done", as.character(i)))
+
+    acc = smape(fc$mean, test_sales$sales)
+    cv.error = rbind(cv.error, acc)
+  }
+  
+  return(cv.error)
+}
+
+x_var <- data.matrix(within(sales, rm("sales", "date")))
+cv.acc = lr.CV(y = sales, window = 1650, h = 20)
+```
+
+# CV Errors
+```{r}
+# Mean SMAPE
+mean(cv.acc, na.rm = T)
+
+# Standard Deviation of SMAPE
+sd(cv.acc, na.rm = T)
+```
+
+
+

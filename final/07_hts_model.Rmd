@@ -31,7 +31,6 @@ gc()
 ```{r}
 datapath = "/Volumes/SSD/TS-Project/data"
 train = fread(file=paste(datapath,"subset/train_city_type_item.csv",sep="/"))
-train = fread('/Users/meghnadiwan/Desktop/train_city_type_item.csv')
 ```
 
 # Transform to Wide form
@@ -40,7 +39,7 @@ train = fread('/Users/meghnadiwan/Desktop/train_city_type_item.csv')
 train_wide = spread(train, hts_label, tot_sales)
 train_wide[is.na(train_wide)] = 0
 train_wide = train_wide %>%
-                  select(-city, -type, -family, -price, -n_promotion, -perishable, -national_flag,
+                  select(-V1, -city, -type, -family, -price, -n_promotion, -perishable, -national_flag,
                          -holiday_flag, -pay.day_flag) %>%
                   group_by(date) %>%
                   summarise_all(funs(sum))
@@ -52,8 +51,8 @@ train.ts = ts(train_wide[2:ncol(train_wide)], frequency=365.25,
 # Run HTS
 ```{r}
 train.hts = hts(train.ts, characters = c(2, 1, 5))
-summary(train.hts)
-smatrix(train.hts)
+# summary(train.hts)
+# smatrix(train.hts)
 ```
 
 # Plot HTS
@@ -188,7 +187,7 @@ rownames(base_results) = c("top.down",  "bottom.up",  "middle.out", "combination
 base_results
 ```
     
-Irrespective of method, hierarchical time series with random walk gives the same SMAPE.
+Irrespective of method, hierarchical time series with random walk gives the same SMAPE of 0.152.
 
 # Base model plots (Top Down)
 ```{r}
@@ -203,7 +202,6 @@ val.hts$bts[,1:5] %>%
   ylim(800,10000)
 ```
 
-# Base model plots (Top Down)
 ```{r}
 rw.top.down$bts[,26:30] %>%
   autoplot(facet=TRUE) +
@@ -239,20 +237,21 @@ comb = forecast(
   keep.fitted = TRUE, keep.resid = TRUE
 )
 
-comb_wls = forecast(
-  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls",
-  keep.fitted = TRUE, keep.resid = TRUE
-)
- 
-comb_wls_alg = forecast(
-  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls", algorithms = "lu",
-  keep.fitted = TRUE, keep.resid = TRUE
-)
-
-comb_nseries = forecast(
-  data.hts, h = 20, method = "comb", fmethod = "arima", weights = "nseries",
-  keep.fitted = TRUE, keep.resid = TRUE
-)
+# More combination variations were tried
+# comb_wls = forecast(
+#   data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls",
+#   keep.fitted = TRUE, keep.resid = TRUE
+# )
+#  
+# comb_wls_alg = forecast(
+#   data.hts, h = 20, method = "comb", fmethod = "arima", weights = "wls", algorithms = "lu",
+#   keep.fitted = TRUE, keep.resid = TRUE
+# )
+# 
+# comb_nseries = forecast(
+#   data.hts, h = 20, method = "comb", fmethod = "arima", weights = "nseries",
+#   keep.fitted = TRUE, keep.resid = TRUE
+# )
 
 ```
 
@@ -261,12 +260,8 @@ comb_nseries = forecast(
 results = rbind(smape(top.down$bts, val.hts$bts),
                 smape(bottom.up$bts, val.hts$bts),
                 smape(middle.out$bts, val.hts$bts),
-                smape(comb$bts, val.hts$bts),
-                smape(comb_wls$bts, val.hts$bts),
-                smape(comb_wls_alg$bts, val.hts$bts), 
-                smape(comb_nseries$bts, val.hts$bts))
-rownames(results) = c("top.down",  "bottom.up",  "middle.out", 
-                      "combination", "comb_wls", "comb_wls_alg", "comb_nseries")
+                smape(comb$bts, val.hts$bts))
+rownames(results) = c("top.down",  "bottom.up",  "middle.out", "combination")
 results
 ```
 
@@ -284,8 +279,6 @@ val.hts$bts[,1:5] %>%
 
 ```
 
-
-# Forecast Plots - Arima 
 ```{r}
 comb$bts[,26:30] %>%
   autoplot(facet=TRUE) +
@@ -300,6 +293,7 @@ val.hts$bts[,26:30] %>%
 ```
 
 # Forecast - Arima with XREG
+## Oil Prices
 ```{r}
 oil_price <- unique(train[,c("date","price")])
 train_oil_price <- oil_price$price[1:1659]
@@ -311,12 +305,11 @@ comb_oil_xreg = forecast(
   data.hts, h = 20, method = "comb", fmethod = "arima",
   keep.fitted = TRUE, keep.resid = TRUE, xreg = train_oil_price, newxreg = test_oil_price
 )
-```
 
-```{r}
 smape(comb_oil_xreg$bts, val.hts$bts)
 ```
 
+## Oil Price, National Flag, Holiday Flag and Pay Day Flag
 ```{r}
 x_var <- unique(train[,c(2,7,10:12)])
 train_x_var <- as.matrix(x_var[1:1659,2:5])
@@ -328,13 +321,11 @@ comb_all_xreg = forecast(
   data.hts, h = 20, method = "comb", fmethod = "arima",
   keep.fitted = TRUE, keep.resid = TRUE, xreg = train_x_var, newxreg = test_x_var
 )
-```
 
-```{r}
 smape(comb_all_xreg$bts, val.hts$bts)
 ```
 
-# Forecast Plots - Arima +Xreg
+### Forecast Plots - Arima +Xreg
 ```{r}
 comb_all_xreg$bts[,1:5] %>%
   autoplot(facet=TRUE) +
@@ -348,7 +339,6 @@ val.hts$bts[,1:5] %>%
 
 ```
 
-# Forecast Plots - Arima Xreg 
 ```{r}
 comb_all_xreg$bts[,26:30] %>%
   autoplot(facet=TRUE) +
@@ -362,7 +352,7 @@ val.hts$bts[,26:30] %>%
 
 ```
 
-# 
+## Oil Price, National Flag, Holiday Flag, Pay Day Flag, Perishable and Promotion
 ```{r}
 # total n_promotions in unique day
 total_n_promotion = train %>% dplyr::group_by(date) %>% dplyr::summarise(total_n_promotion =sum(n_promotion))
@@ -371,7 +361,6 @@ total_perishable = train %>% dplyr::group_by(date) %>% dplyr::summarise(total_pe
 
 x_var$total_n_promotion <- total_n_promotion$total_n_promotion
 x_var$total_perishable <- total_perishable$total_perishable
-
 
 train_x_var_all <- as.matrix(x_var[1:1659,2:7])
 test_x_var_all <- as.matrix(x_var[1660:1679,2:7])
@@ -382,13 +371,23 @@ comb_all_xreg_n = forecast(
   data.hts, h = 20, method = "comb", fmethod = "arima",
   keep.fitted = TRUE, keep.resid = TRUE, xreg = train_x_var_all, newxreg = test_x_var_all
 )
-```
 
-```{r}
+# Overall SMAPE
 smape(comb_all_xreg_n$bts, val.hts$bts)
 ```
 
+# SMAPE Across each group
+```{r}
+smape.values <- data.frame()
+for (i in 1:45){
+  smape.values<-rbind(smape.values, smape(comb_all_xreg_n$bts[,i], val.hts$bts[,i]))
+}
 
+smape.values
+smape.final <- colSums(smape.values)/45; smape.final
+```
+
+### Forecast Plots - Arima Xreg 
 ```{r}
 comb_all_xreg_n$bts[,1:5] %>%
   autoplot(facet=TRUE) +
@@ -402,22 +401,7 @@ val.hts$bts[,1:5] %>%
 
 ```
 
-
-```{r}
-smape.values <- data.frame()
-for (i in 1:45){
-  smape.values<-rbind(smape.values, smape(val.hts$bts[,i],comb_all_xreg_n$bts[,i]))
-}
-
-smape.values
-
-```
-
-```{r}
-smape.final <- colSums(smape.values)/45; smape.final
-```
-
-# Cross-Validation Function
+# Cross-Validation Function using Arima & Xreg
 ```{r}
 hts.CV = function(y, window, h) {
   cv.error = matrix(ncol = 1)
@@ -451,12 +435,12 @@ hts.CV = function(y, window, h) {
 # CV Using 10 Folds
 ```{r}
 start.time = Sys.time()
-cv.acc = hts.CV(y = train.ts, window = 1640, h = 30) # takes 11 mins to run one fold
+cv.acc = hts.CV(y = train.ts, window = 1650, h = 20) # takes 11 mins to run one fold
 end.time = Sys.time()
 (time.taken = end.time - start.time)
 ```
     
-Due to limited computational power, only 10-fold CV was implemented.
+Due to limited computational power, only 3-fold CV was implemented.
 
 # CV Errors
 ```{r}
