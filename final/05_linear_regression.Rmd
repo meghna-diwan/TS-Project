@@ -263,6 +263,22 @@ val_actual = as.matrix(tail(train_wide[, 4:48], 20))
 smape(val_pred, val_actual)
 ```
 
+```{r}
+val_actual
+```
+
+# SMAPE Across the bottom level
+```{r}
+smape.values <- data.frame()
+
+# Calculating smape for each column
+for (i in 1:45){
+  smape.values <- rbind(smape.values, smape(val_pred[, i] ,val_actual[, i]))
+}
+
+as.vector(unlist(smape.values))
+```
+
 # Using Auto.Arima
 ```{r}
 (minday = as.Date("2013-01-02"))
