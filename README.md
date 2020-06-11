@@ -38,4 +38,4 @@ All our finalized notebooks are in the "final" folder.
  ## Results
  
  The results for each model can be found in the "results" folder. 
- The hierarchical time series with combination method was the best performing model giving an SMAPE of 9.02% on a 20-day forecast.
+ The hierarchical time series with combination method was the best performing model giving an SMAPE of 8.73% on a 20-day forecast.
