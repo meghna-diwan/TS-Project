@@ -225,6 +225,8 @@ for (i in 4:48){
 
 # Taking the average
 smape.final <- colSums(smape.values)/45; smape.final
+
+as.numeric(unlist(smape.values))
 ```
 
 # Cross-Validation Function 
